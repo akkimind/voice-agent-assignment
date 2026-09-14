@@ -1,0 +1,12 @@
+# LiveKit Agents framework and the plugins for our chosen providers
+livekit-agents~=1.8
+livekit-plugins-deepgram~=1.8
+livekit-plugins-openai~=1.8
+livekit-plugins-silero~=1.8
+livekit-plugins-turn-detector~=1.8
+
+# Opik observability and evaluation
+opik~=2.2
+
+# Config loading
+python-dotenv~=1.0

@@ -1,0 +1,32 @@
+[
+  {
+    "id": "p-001",
+    "name": "Priya Sharma",
+    "pronouns": "she/her",
+    "phone": "+15555550101",
+    "hba1c": 8.2,
+    "blood_glucose": 186,
+    "last_visit": "2026-06-14",
+    "timezone": "Asia/Kolkata"
+  },
+  {
+    "id": "p-002",
+    "name": "Arjun Mehta",
+    "pronouns": "he/him",
+    "phone": "+15555550101",
+    "hba1c": 6.1,
+    "blood_glucose": 118,
+    "last_visit": "2026-07-02",
+    "timezone": "Asia/Kolkata"
+  },
+  {
+    "id": "p-003",
+    "name": "Kiran Rao",
+    "pronouns": "they/them",
+    "phone": "+15555550101",
+    "hba1c": 9.4,
+    "blood_glucose": 232,
+    "last_visit": "2026-05-28",
+    "timezone": "Asia/Kolkata"
+  }
+]

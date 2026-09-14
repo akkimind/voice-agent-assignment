@@ -1,0 +1,36 @@
+# secrets
+.env
+.env.local
+*.pem
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# call artifacts — may contain patient audio or PHI
+recordings/
+session_reports/
+*.ogg
+*.wav
+
+# editor / os
+.DS_Store
+.idea/
+*.swp
+
+# runtime data written by the agent (mock patient records)
+clinic.db
+clinic.db-wal
+clinic.db-shm
+bookings.json
+callback_queue.json
+
+# per-call timing logs (transcripts, patient details)
+logs/
+
+# local assistant tooling
+.remember/
+.claude/settings.local.json

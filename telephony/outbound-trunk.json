@@ -1,0 +1,7 @@
+{
+  "trunk": {
+    "name": "adit-outbound",
+    "address": "REPLACE_WITH_TWILIO_TERMINATION_DOMAIN.pstn.twilio.com",
+    "numbers": ["+15555550100"]
+  }
+}
