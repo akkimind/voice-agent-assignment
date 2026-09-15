@@ -34,3 +34,33 @@ class SlotGrounded(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OfferMustBeAnswered(unittest.TestCase):
+    """A slot the agent offered is only bookable after the patient has spoken since."""
+
+    def _ctx(self, *user_lines):
+        from types import SimpleNamespace
+        items = [SimpleNamespace(type="message", role="user", text_content=t) for t in user_lines]
+        return SimpleNamespace(session=SimpleNamespace(history=SimpleNamespace(items=items)))
+
+    def test_offer_then_book_in_same_breath_is_not_trusted(self):
+        import agent
+        from tests.helpers import at
+        a = agent.HealthcareAgent({"id": "p", "name": "Priya Sharma", "pronouns": "she/her",
+                                   "hba1c": 8.2, "blood_glucose": 186})
+        ctx = self._ctx("Yes, it's Priya", "Morning")
+        a._remember_offered(ctx, [at(14, 11, 30)])
+        self.assertFalse(a._patient_answered_offer(ctx, at(14, 11, 30)))
+        self.assertTrue(a._patient_answered_offer(self._ctx("Yes, it's Priya", "Morning", "Yes"), at(14, 11, 30)))
+
+    def test_same_time_on_another_day_trusts_the_offered_clock(self):
+        import agent
+        from tests.helpers import at
+        a = agent.HealthcareAgent({"id": "p", "name": "Priya Sharma", "pronouns": "she/her",
+                                   "hba1c": 8.2, "blood_glucose": 186})
+        a._remember_offered(self._ctx("Yes"), [at(14, 9)])
+        ctx = self._ctx("Yes", "Can we do Friday at that time instead?")
+        self.assertTrue(agent.day_grounded("friday", agent._user_text(ctx)))
+        self.assertTrue(a._offered_clock_answered(ctx, at(18, 9)))
+        self.assertFalse(a._offered_clock_answered(ctx, at(18, 10)))

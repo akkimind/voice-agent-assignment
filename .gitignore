@@ -34,3 +34,4 @@ logs/
 # local assistant tooling
 .remember/
 .claude/settings.local.json
+evals/results/

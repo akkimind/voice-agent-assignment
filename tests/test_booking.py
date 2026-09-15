@@ -29,14 +29,12 @@ class Booking(unittest.TestCase):
         self.assertEqual(out.status, "booked")
         self.assertTrue(db.slot_is_booked(self.t.conn, config.DOCTOR["id"], to_utc_iso(at(14, 11))))
 
-    def test_taken_slot_offers_nearest_free_alternatives(self):
+    def test_taken_slot_offers_earliest_free_time_after_it(self):
         out = self.book(day="monday", time="16:00")
         self.assertEqual(out.status, "unavailable")
         self.assertIn("already booked", out.reason)
-        self.assertEqual(len(out.alternatives), config.ALTERNATIVE_SLOTS_OFFERED)
-        self.assertIn(at(14, 15, 30), out.alternatives)
-        self.assertNotIn(at(14, 16, 30), out.alternatives)
-        self.assertEqual(out.alternatives, sorted(out.alternatives))
+        # 16:30 is taken too and 17:00 is closing, so the next real option is Tuesday 9:00.
+        self.assertEqual(out.alternatives, [at(15, 9)])
 
     def test_two_patients_cannot_take_one_slot(self):
         self.assertEqual(self.book(day="monday", time="11:00").status, "booked")
@@ -55,8 +53,7 @@ class Booking(unittest.TestCase):
     def test_between_slots_is_not_rounded(self):
         out = self.book(day="monday", time="11:10")
         self.assertEqual(out.status, "unavailable")
-        self.assertIn(at(14, 11), out.alternatives)
-        self.assertIn(at(14, 11, 30), out.alternatives)
+        self.assertEqual(out.alternatives, [at(14, 11, 30)])
 
     def test_too_soon(self):
         out = self.book(now=at(14, 9, 40), day="today", time="10:30")
@@ -103,12 +100,9 @@ class Booking(unittest.TestCase):
         self.assertIn("just booked", out.reason)
         self.assertTrue(db.slot_is_booked(self.t.conn, config.DOCTOR["id"], to_utc_iso(at(14, 11))))
 
-    def test_available_slots_skip_taken_times(self):
-        slots, reason = booking.available_slots(self.t.conn, now=NOW, day="monday", part_of_day="afternoon", limit=20)
-        self.assertIsNone(reason)
-        self.assertIn(at(14, 15, 30), slots)
-        self.assertNotIn(at(14, 16), slots)
-        self.assertNotIn(at(14, 16, 30), slots)
+    def test_earliest_skips_taken_times(self):
+        start = booking.search_start(NOW, day="monday", time="16:00", part_of_day=None)
+        self.assertEqual(booking.earliest_free_slot(self.t.conn, now=NOW, not_before=start), at(15, 9))
 
 
 if __name__ == "__main__":
@@ -122,22 +116,26 @@ class Ranking(unittest.TestCase):
     def tearDown(self):
         self.t.close()
 
-    def test_closed_day_offers_similar_time_on_nearest_open_days(self):
-        # Sunday 20th at 11:00 is closed. Saturday 19th and Monday 21st at 11:00 are
-        # one day away at the same time of day, so they rank first.
+    def test_closed_day_offers_earliest_after_it(self):
         out = booking.request_appointment(self.t.conn, patient=self.t.patient("p-003"), now=NOW,
                                           day="sunday", time="11:00")
-        self.assertIn(at(19, 11), out.alternatives)
-        self.assertIn(at(21, 11), out.alternatives)
-        self.assertTrue(all(9 <= s.hour <= 12 for s in out.alternatives), out.alternatives)
+        self.assertIn("closed on Sundays", out.reason)
+        self.assertEqual(out.alternatives, [at(21, 9)])
 
-    def test_no_day_means_first_day_with_free_slots(self):
-        slots, reason = booking.available_slots(self.t.conn, now=NOW, day=None, part_of_day=None)
-        self.assertIsNone(reason)
-        self.assertEqual(slots[0], at(14, 9))  # Sunday is closed, Monday 9:00 is free
+    def test_no_preference_means_earliest_overall(self):
+        start = booking.search_start(NOW, day=None, time=None, part_of_day=None)
+        self.assertEqual(booking.earliest_free_slot(self.t.conn, now=NOW, not_before=start), at(14, 9))
+
+    def test_day_only_means_earliest_that_day(self):
+        start = booking.search_start(NOW, day="tuesday", time=None, part_of_day=None)
+        self.assertEqual(booking.earliest_free_slot(self.t.conn, now=NOW, not_before=start), at(15, 9))
+
+    def test_part_of_day_starts_the_search_there(self):
+        start = booking.search_start(NOW, day="monday", time=None, part_of_day="afternoon")
+        self.assertEqual(booking.earliest_free_slot(self.t.conn, now=NOW, not_before=start), at(14, 12))
 
 
-class PreferenceFlow(unittest.TestCase):
+class EarliestFlow(unittest.TestCase):
     """Seed has Monday 14th 10:00 taken."""
 
     def setUp(self):
@@ -149,19 +147,21 @@ class PreferenceFlow(unittest.TestCase):
     def book(self, **kw):
         return booking.request_appointment(self.t.conn, patient=self.t.patient("p-001"), now=NOW, **kw)
 
-    def test_quarter_past_offers_the_slot_either_side(self):
+    def test_quarter_past_offers_the_next_slot(self):
         out = self.book(day="monday", time="11:15")
         self.assertEqual(out.status, "unavailable")
-        self.assertEqual(out.alternatives, [at(14, 11), at(14, 11, 30)])
+        self.assertEqual(out.alternatives, [at(14, 11, 30)])
 
     def test_quarter_past_skips_a_taken_neighbour(self):
         self.assertEqual(self.book(day="monday", time="10:15").alternatives, [at(14, 10, 30)])
 
-    def test_morning_ranges_group_consecutive_slots(self):
-        slots, _ = booking.available_slots(self.t.conn, now=NOW, day="monday", part_of_day="morning", limit=None)
-        self.assertEqual(booking.free_ranges(slots), [(at(14, 9), at(14, 9, 30)), (at(14, 10, 30), at(14, 11, 30))])
+    def test_day_without_time_offers_one_earliest_slot(self):
+        out = self.book(day="monday", part_of_day="afternoon")
+        self.assertEqual(out.status, "needs_time")
+        self.assertEqual(out.alternatives, [at(14, 12)])
 
-    def test_ranges_are_spoken_per_day(self):
+    def test_offer_says_when_the_day_was_full(self):
         import agent
-        text = agent._say_ranges([at(14, 9), at(14, 9, 30), at(14, 11, 30)], NOW)
-        self.assertEqual(text, "tomorrow: from 9:00 AM to 9:30 AM, or at 11:30 AM")
+        text = agent._offer(at(15, 9), at(14, 16), NOW, "monday")
+        self.assertIn("Nothing free on that day", text)
+        self.assertIn("9:00 AM", text)

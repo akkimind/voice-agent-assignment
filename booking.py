@@ -6,8 +6,8 @@ flow for every request:
 1. Resolve the patient's structured request into a slot in clinic time.
 2. Under the database write lock, check the slot is valid and free, and that
    the patient has no other upcoming appointment.
-3. If anything fails, book nothing and return the nearest free alternatives
-   so the agent can offer them. Nothing is ever silently rounded or moved.
+3. If anything fails, book nothing and return the earliest free slot after
+   the requested time so the agent can offer it. Nothing is ever silently rounded or moved.
 
 The unique index in db.py is the final guard: even if two processes raced past
 the checks, the second INSERT would fail.
@@ -91,77 +91,31 @@ def _free(conn: sqlite3.Connection, slots: list[datetime], now: datetime) -> lis
     return [s for s in slots if scheduling.to_utc_iso(s) not in booked]
 
 
-def nearest_free_slots(conn: sqlite3.Connection, *, requested: datetime, now: datetime,
-                       limit: int = config.ALTERNATIVE_SLOTS_OFFERED) -> list[datetime]:
-    """The free slots closest to what was asked for, returned in time order.
+def earliest_free_slot(conn: sqlite3.Connection, *, now: datetime, not_before: datetime) -> datetime | None:
+    """The first bookable, unbooked slot starting at or after not_before.
 
-    Closeness is judged the way a person would: nearest day first, then nearest
-    time of day. Someone who wanted Sunday at 11 hears Saturday or Monday around
-    11, not Saturday at 4:30 PM just because it is fewer raw hours away.
+    One rule covers every "when can I come?" case: no preference searches from
+    now, "Friday" from Friday's opening, and a taken or impossible time from
+    that time onward, so the patient always hears the next real option after
+    what they asked for.
     """
-    free = _free(conn, list(_valid_slots(now)), now)
-    wanted_minute = requested.hour * 60 + requested.minute
-    free.sort(key=lambda s: (
-        abs((s.date() - requested.date()).days),
-        abs(s.hour * 60 + s.minute - wanted_minute),
-        s,
-    ))
-    return sorted(free[:limit])
+    start = max(not_before, now)
+    candidates = [s for s in _valid_slots(now) if s >= start]
+    free = _free(conn, candidates, now)
+    return free[0] if free else None
 
 
-def neighbouring_free_slots(conn: sqlite3.Connection, *, requested: datetime, now: datetime) -> list[datetime]:
-    """For a time between slots, the free slot either side of it.
-
-    "10:15" should hear "10:00 or 10:30", not three times ranked across the day.
-    Falls back to the nearest free slots when neither neighbour can be booked.
-    """
-    minute_of_day = requested.hour * 60 + requested.minute
-    floor = requested.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(
-        minutes=minute_of_day - minute_of_day % config.APPOINTMENT_SLOT_MINUTES)
-    either_side = [s for s in (floor, floor + SLOT) if slot_problem(s, now) is None]
-    return _free(conn, either_side, now) or nearest_free_slots(conn, requested=requested, now=now)
-
-
-def free_ranges(slots: list[datetime]) -> list[tuple[datetime, datetime]]:
-    """Group consecutive slots into (first start, last start) runs.
-
-    9:00, 9:30, 10:00, 11:30 becomes [(9:00, 10:00), (11:30, 11:30)], which the
-    agent can say as "from 9 to 10 AM, or at 11:30 AM".
-    """
-    ranges: list[tuple[datetime, datetime]] = []
-    for slot in sorted(slots):
-        if ranges and slot - ranges[-1][1] == SLOT:
-            ranges[-1] = (ranges[-1][0], slot)
-        else:
-            ranges.append((slot, slot))
-    return ranges
-
-
-def available_slots(conn: sqlite3.Connection, *, now: datetime, day: Day | None,
-                    part_of_day: PartOfDay | None, limit: int | None = 4) -> tuple[list[datetime], str | None]:
-    """Free slots on one day, optionally within a part of the day.
-
-    Returns (slots, reason_if_none) so the agent can say why nothing is free.
-    """
-    hours = config.PART_OF_DAY_RANGES[part_of_day] if part_of_day else None
-
-    if day is None:
-        # No day named: the first day that has anything free.
-        cursor = now.date()
-        while cursor <= (now + HORIZON).date():
-            slots = _free(conn, list(_valid_slots(now, on_date=cursor, hours=hours)), now)
-            if slots:
-                return slots[:limit], None
-            cursor += timedelta(days=1)
-        return [], "nothing is free in the next few weeks"
-
-    target = scheduling.requested_datetime(now, day=day, time="12:00")
-    if target.weekday() not in config.CLINIC_OPEN_WEEKDAYS:
-        return [], f"the clinic is closed on {DAY_NAMES[target.weekday()]}s"
-    slots = _free(conn, list(_valid_slots(now, on_date=target.date(), hours=hours)), now)
-    if not slots:
-        return [], "nothing is free then"
-    return slots[:limit], None
+def search_start(now: datetime, *, day: Day | None, time: str | None,
+                 part_of_day: PartOfDay | None) -> datetime:
+    """Where a search for the earliest slot begins, from the patient's words."""
+    if time is not None:
+        return scheduling.requested_datetime(now, day=day, time=time)
+    if part_of_day is not None:
+        start_hour = config.PART_OF_DAY_RANGES[part_of_day][0]
+        return scheduling.requested_datetime(now, day=day or "today", time=f"{start_hour:02d}:00")
+    if day is not None:
+        return scheduling.requested_datetime(now, day=day, time="00:00")
+    return now
 
 
 def request_appointment(
@@ -178,13 +132,11 @@ def request_appointment(
 ) -> BookingOutcome:
     """Book the requested slot, or explain why not and offer alternatives."""
     if time is None:
-        # A day or part of day alone is not a choice of slot. Offer real free
-        # times instead of picking one on the patient's behalf.
-        slots, reason = available_slots(conn, now=now, day=day, part_of_day=part_of_day, limit=None)
-        if not slots:
-            anchor = scheduling.requested_datetime(now, day=day, part_of_day=part_of_day) or now
-            slots = nearest_free_slots(conn, requested=anchor, now=now)
-        return BookingOutcome("needs_time", reason=reason or "", alternatives=slots)
+        # A day or part of day alone is not a choice of slot. Offer the earliest
+        # real one instead of booking on the patient's behalf.
+        start = search_start(now, day=day, time=None, part_of_day=part_of_day)
+        slot = earliest_free_slot(conn, now=now, not_before=start)
+        return BookingOutcome("needs_time", requested=start, alternatives=[slot] if slot else [])
 
     requested = scheduling.requested_datetime(now, day=day, time=time, part_of_day=part_of_day)
     requested_utc = scheduling.to_utc_iso(requested)
@@ -201,10 +153,8 @@ def request_appointment(
             if problem is None and db.slot_is_booked(conn, config.DOCTOR["id"], requested_utc):
                 problem = "that time is already booked"
             if problem:
-                off_grid = not scheduling.on_grid(requested, config.APPOINTMENT_SLOT_MINUTES)
-                finder = neighbouring_free_slots if off_grid else nearest_free_slots
                 return BookingOutcome("unavailable", requested, problem,
-                                      alternatives=finder(conn, requested=requested, now=now))
+                                      alternatives=_next_after(conn, requested, now))
 
             if existing and not replace_existing:
                 return BookingOutcome("has_existing", requested, existing=existing)
@@ -227,4 +177,9 @@ def request_appointment(
         # Another call took the slot between our check and our insert. The
         # transaction rolled back, so any cancellation above was undone too.
         return BookingOutcome("unavailable", requested, "someone has just booked that time",
-                              alternatives=nearest_free_slots(conn, requested=requested, now=now))
+                              alternatives=_next_after(conn, requested, now))
+
+
+def _next_after(conn: sqlite3.Connection, requested: datetime, now: datetime) -> list[datetime]:
+    slot = earliest_free_slot(conn, now=now, not_before=requested)
+    return [slot] if slot else []
