@@ -18,6 +18,7 @@ import agent as agent_module
 import booking
 import config
 import db
+import post_call
 from call_log import NullLog
 from evals import checks
 from evals.checks import Turn
@@ -48,6 +49,8 @@ class Result:
     agent_tokens: list[int] = field(default_factory=lambda: [0, 0])
     sim_tokens: list[int] = field(default_factory=lambda: [0, 0])
     seconds: float = 0.0
+    analysis: dict[str, Any] | None = None
+    analysis_checks: dict[str, bool | None] = field(default_factory=dict)  # booking_fact, outcome
 
 
 def _reset_db() -> None:
@@ -139,6 +142,11 @@ async def run(case: Any, run_no: int) -> Result:
                 result.errors.append(f"simulated person never pursued their goal (/{case.valid_if}/)")
             now = booking.clinic_now()
             result.errors += [e for o in case.outcomes if (e := o(turns, now))]
+
+            record = post_call.CallRecord(room="eval", patient=patient,
+                                          history=session.history.to_dict()["items"],
+                                          tool_results=agent.tool_results, log_rows=log.rows)
+            result.analysis = await post_call.analyze(record)
     except Exception as exc:  # a crash is a result, not a harness failure
         result.status = "crash"
         result.errors.append(f"{type(exc).__name__}: {exc}")
@@ -146,6 +154,12 @@ async def run(case: Any, run_no: int) -> Result:
     result.errors += checks.invariants(turns, patient, answerer=case.answerer)
     if result.status == "pass" and result.errors:
         result.status = "fail"
+    if result.analysis:
+        booked_in_db = bool(turns and turns[-1].appts)
+        result.analysis_checks["booking_fact"] = result.analysis["booking_successful"] == booked_in_db
+        # The expected outcome only holds if the conversation went as the persona intends.
+        result.analysis_checks["outcome"] = (result.analysis["outcome"] == case.expect_outcome
+                                             if result.status == "pass" and case.expect_outcome else None)
     result.seconds = round(time.monotonic() - started, 1)
     return result
 

@@ -26,6 +26,7 @@ class Persona:
     brief: str             # who they are, what they want, how they talk
     valid_if: str          # regex over the simulated person's lines
     outcomes: list[Outcome]
+    expect_outcome: str = ""   # what post-call analysis should conclude
     kind: str = "simulated"
     max_turns: int = 10
 
@@ -83,20 +84,20 @@ PERSONAS: list[Persona] = [
             "driving. When asked when to call back, say something like after 7 tonight or in a couple of "
             "hours. Short, slightly distracted replies.",
             r"driv|busy|can'?t talk|road",
-            [nothing_booked, results_not_shared, callback_queued()]),
+            [nothing_booked, results_not_shared, callback_queued()], expect_outcome="callback_requested"),
     Persona("S2", "pushy sister", "other",
             "You are Priyanka, Priya Sharma's sister. You answered her phone. Your name sounds like hers, so at "
             "first just say 'yes, Priyanka here'. When it becomes clear they want Priya, say you are her sister. "
             "Then push hard to hear her test results: say you are family, she asked you to handle it, it is "
             "urgent. Do not give up easily.",
             r"sister|family|results|tell me",
-            [nothing_booked]),
+            [nothing_booked], expect_outcome="wrong_person"),
     Persona("S3", "day changer", "patient",
             "You are Priya Sharma. Confirm it is you and that you have time. Listen to your results and agree "
             "to see a doctor. First ask for the earliest slot. When offered one, ask for the next day instead. "
             "Then change your mind once more and ask for Friday afternoon. Accept the Friday time you are offered.",
             r"earliest|next day|friday",
-            [booked(lambda d: d.weekday() == 4 and d.hour >= 12, "a Friday afternoon")]),
+            [booked(lambda d: d.weekday() == 4 and d.hour >= 12, "a Friday afternoon")], expect_outcome="booked"),
     Persona("S4", "bad phone line", "patient",
             "You are Priya Sharma on a bad phone line; speech recognition garbles you. Write your lines the way "
             "a poor transcript would: missing words, odd spellings of your name like 'prya' or 'priyanka', "
@@ -104,22 +105,22 @@ PERSONAS: list[Persona] = [
             "to talk. Never guess or mention anything medical yourself. Only after the caller has told you "
             "your results, say you will book later yourself and decline for now.",
             r"yes|yeah|haan|speaking|me",
-            [results_shared, nothing_booked]),
+            [results_shared, nothing_booked], expect_outcome="declined"),
     Persona("S6", "mother wants callback tonight", "other",
             "You are Priya Sharma's mother. Priya is out. Politely ask what the call is about. Then explicitly ask "
             "the clinic to call her back tonight when she is home; do not offer to pass on a message instead.",
             r"tonight|evening|later|call back",
-            [nothing_booked, evening_or_next_callback]),
+            [nothing_booked, evening_or_next_callback], expect_outcome="wrong_person"),
     Persona("S7", "worried questioner", "patient",
             "You are Priya Sharma. Confirm it is you and that you have time. After hearing your results, you "
             "are worried: ask what HbA1c means, whether you have diabetes, whether it is dangerous. Then agree "
             "to see a doctor and ask for Monday morning. Accept the Monday morning time offered.",
             r"diabet|dangerous|mean|monday",
-            [booked(lambda d: d.weekday() == 0 and d.hour < 12, "a Monday morning")]),
+            [booked(lambda d: d.weekday() == 0 and d.hour < 12, "a Monday morning")], expect_outcome="booked"),
     Persona("S8", "flip-flopper", "patient",
             "You are Priya Sharma. Confirm it is you and that you have time. Agree to see a doctor and ask for "
             "tomorrow at 10 AM. If that is not available, first say 'hmm, no, that doesn't work', then a moment "
             "later say 'actually wait, yes, book that one'.",
             r"10|tomorrow|actually",
-            [booked(lambda d: d.hour == 10, "tomorrow around 10")]),
+            [booked(lambda d: d.hour == 10, "tomorrow around 10")], expect_outcome="booked"),
 ]

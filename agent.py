@@ -42,6 +42,7 @@ from call_log import CallLog, NullLog
 import callback_queue
 import config
 import db
+import post_call
 import scheduling
 from scheduling import Day, PartOfDay, SchedulingError
 
@@ -1157,14 +1158,14 @@ def _log_session_events(session: AgentSession, log: CallLog) -> None:
     session.on("close", lambda ev: log.event("session_close", reason=str(ev.reason)))
 
 
-def _save_transcript(ctx: JobContext, agent: HealthcareAgent, session: AgentSession) -> Path:
+def _save_transcript_for(room: str, agent: HealthcareAgent, session: AgentSession) -> Path:
     """Persist the conversation so later phases have something to analyze."""
     TRANSCRIPT_DIR.mkdir(exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    path = TRANSCRIPT_DIR / f"{ctx.room.name}_{stamp}.json"
+    path = TRANSCRIPT_DIR / f"{room}_{stamp}.json"
 
     payload = {
-        "room": ctx.room.name,
+        "room": room,
         "patient": agent.patient,
         "ended_at": datetime.now(timezone.utc).isoformat(),
         "history": session.history.to_dict(),
@@ -1175,7 +1176,43 @@ def _save_transcript(ctx: JobContext, agent: HealthcareAgent, session: AgentSess
     return path
 
 
-@server.rtc_session(agent_name=AGENT_NAME)
+# Calls in progress in this process, so the session-end hook can reach them.
+_CALLS: dict[str, dict[str, Any]] = {}
+
+
+async def _analyze_call(room: str, call: dict[str, Any]) -> None:
+    """Save the transcript and the post-call analysis next to it. Never raises."""
+    agent, session, call_log = call["agent"], call["session"], call["log"]
+    _save_transcript_for(room, agent, session)
+    try:
+        rows = [json.loads(line) for line in call_log.path.read_text().splitlines() if line.strip()]
+        record = post_call.CallRecord(room=room, patient=agent.patient,
+                                      history=session.history.to_dict()["items"],
+                                      tool_results=agent.tool_results, log_rows=rows)
+        analysis = await post_call.analyze(record)
+        TRANSCRIPT_DIR.mkdir(exist_ok=True)
+        path = TRANSCRIPT_DIR / f"{room}_{datetime.now(timezone.utc):%Y%m%d_%H%M%S}_analysis.json"
+        path.write_text(json.dumps(analysis, indent=2, default=str))
+        call_log.event("analysis_done", outcome=analysis["outcome"],
+                       booking_successful=analysis["booking_successful"],
+                       flags=analysis["flags"], error=analysis["error"], path=str(path))
+        logger.info("call analysis: %s (booking %s) saved to %s",
+                    analysis["outcome"], analysis["booking_successful"], path)
+    except Exception as exc:
+        logger.exception("post-call analysis failed")
+        call_log.event("analysis_failed", error=f"{type(exc).__name__}: {exc}")
+    finally:
+        call["analyzed"] = True
+
+
+async def _on_session_end(ctx: JobContext) -> None:
+    # Runs after the session closes and before shutdown callbacks, with a far
+    # longer allowance (300 s) than they get (10 s), so analysis fits here.
+    if (call := _CALLS.get(ctx.room.name)) and not call.get("analyzed"):
+        await _analyze_call(ctx.room.name, call)
+
+
+@server.rtc_session(agent_name=AGENT_NAME, on_session_end=_on_session_end)
 async def entrypoint(ctx: JobContext) -> None:
     patient = _select_patient(ctx)
     logger.info("starting call for %s (%s)", patient["name"], patient["id"])
@@ -1195,8 +1232,13 @@ async def entrypoint(ctx: JobContext) -> None:
     # so waiting would only add a pause before the agent speaks.
     await _open_conversation(session, patient, let_them_speak_first=False)
 
+    _CALLS[ctx.room.name] = {"agent": agent, "session": session, "log": call_log}
+
     async def _on_shutdown() -> None:
-        _save_transcript(ctx, agent, session)
+        call = _CALLS.pop(ctx.room.name, None)
+        if call and not call.get("analyzed"):
+            # The session-end hook did not run; keep at least the transcript.
+            _save_transcript_for(ctx.room.name, agent, session)
         call_log.close()
 
     ctx.add_shutdown_callback(_on_shutdown)

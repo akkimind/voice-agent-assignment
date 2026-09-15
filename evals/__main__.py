@@ -74,14 +74,15 @@ def _summary(results: list[dict], elapsed: float) -> str:
     by_case: dict[str, list[dict]] = defaultdict(list)
     for r in results:
         by_case[r["id"]].append(r)
-    lines = ["| persona | runs | passed | first problem |", "|---|---|---|---|"]
+    lines = ["| persona | runs | passed | analysis outcomes | first problem |", "|---|---|---|---|---|"]
     for cid, rs in sorted(by_case.items()):
         rs.sort(key=lambda r: r["run"])
         marks = "".join(MARK[r["status"]] for r in rs)
         passed = sum(r["status"] == "pass" for r in rs)
         valid = sum(r["status"] != "invalid" for r in rs)
         problem = next((e for r in rs if r["status"] != "pass" for e in r["errors"]), "")
-        lines.append(f"| {cid} {rs[0]['name']} | {marks} | {passed}/{valid} | {problem[:140]} |")
+        seen = [r["analysis"]["outcome"] if r.get("analysis") else "-" for r in rs]
+        lines.append(f"| {cid} {rs[0]['name']} | {marks} | {passed}/{valid} | {', '.join(seen)} | {problem[:120]} |")
 
     agent_in = sum(r["agent_tokens"][0] for r in results)
     agent_out = sum(r["agent_tokens"][1] for r in results)
@@ -95,8 +96,19 @@ def _summary(results: list[dict], elapsed: float) -> str:
     for r in results:
         for g in r["guards"]:
             guards[g] += 1
+    outcome_checks = [r["analysis_checks"].get("outcome") for r in results if r.get("analysis_checks")]
+    fact_checks = [r["analysis_checks"].get("booking_fact") for r in results if r.get("analysis_checks")]
+    scored = [c for c in outcome_checks if c is not None]
+    a_in = sum((r.get("analysis") or {}).get("analysis_tokens", {}).get("input", 0) for r in results)
+    a_out = sum((r.get("analysis") or {}).get("analysis_tokens", {}).get("output", 0) for r in results)
+    cost += (a_in * PRICE_SIM[0] + a_out * PRICE_SIM[1]) / 1e6
+    overrides = sum(len((r.get("analysis") or {}).get("overridden", [])) for r in results)
+    analysis_errors = [r["id"] for r in results if (r.get("analysis") or {}).get("error")]
     return "\n".join([
         "", *lines, "",
+        f"analysis: outcome matched {sum(scored)}/{len(scored)} passing calls · booking fact matched "
+        f"{sum(bool(c) for c in fact_checks)}/{len(fact_checks)} · overrides {overrides} · "
+        f"model errors {len(analysis_errors)} · tokens {a_in:,} in / {a_out:,} out",
         f"pass {counts['pass']} · fail {counts['fail']} · invalid {counts['invalid']} · crash {counts['crash']}"
         f"  ({len(results)} conversations in {elapsed / 60:.1f} min)",
         f"tokens: agent {agent_in:,} in / {agent_out:,} out · simulated patient {sim_in:,} in / {sim_out:,} out"
@@ -109,10 +121,14 @@ def _summary(results: list[dict], elapsed: float) -> str:
 def _failures(results: list[dict]) -> str:
     parts = []
     for r in sorted(results, key=lambda r: (r["id"], r["run"])):
-        if r["status"] == "pass":
+        if r["status"] == "pass" and all(v is not False for v in r.get("analysis_checks", {}).values()):
             continue
         parts.append(f"## {r['id']} {r['name']} · run {r['run']} · {r['status']}\n")
         parts += [f"- {e}" for e in r["errors"]]
+        if r.get("analysis"):
+            a = r["analysis"]
+            parts.append(f"- analysis: {a['outcome']} · overridden {a['overridden']} · flags {a['flags']} · "
+                         f"error {a['error']} · {(a.get('judgement') or {}).get('summary')}")
         parts.append("\n```\n" + "\n".join(r["transcript"]) + "\n```\n")
     return "\n".join(parts) or "No failures.\n"
 

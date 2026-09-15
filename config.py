@@ -27,8 +27,11 @@ LIVEKIT_LLM_MODEL = "openai/gpt-oss-120b"
 LLM_PRIMARY = "groq"   # or "livekit"
 LLM_REASONING_EFFORT = "low"
 
-# A smaller, cheaper model is plenty for structured post-call extraction.
-ANALYSIS_MODEL = "openai/gpt-oss-120b"
+# Post-call judgement. The hard facts (booking, callback) come from code, so the
+# smaller model is enough; LiveKit Inference has no 20b, hence the 120b fallback.
+ANALYSIS_MODEL = "openai/gpt-oss-20b"
+ANALYSIS_FALLBACK_MODEL = "openai/gpt-oss-120b"
+ANALYSIS_TIMEOUT_SECONDS = 20
 
 STT_MODEL = "nova-3"
 # aura-asteria-en is the Aura-1 voice named in the master plan. Aura-2 is the
@@ -75,6 +78,7 @@ CALL_OUTCOMES = (
     "declined",
     "callback_requested",
     "wrong_person",
+    "incomplete",      # the call ended before any decision, e.g. a hang-up mid-call
     "no_answer",
     "voicemail",
     "rejected",
@@ -190,6 +194,38 @@ def build_system_prompt(patient: dict[str, Any]) -> str:
 # reason stay unsaid. Fixed text also saves one LLM request per call.
 def opening_line(patient: dict[str, Any]) -> str:
     return f"Hi, may I speak with {patient['name']}, please?"
+
+# --- Post-call analysis ----------------------------------------------------
+ANALYSIS_PROMPT = """\
+You review a finished outbound call from a clinic's voice agent to the patient \
+{patient_name}. Decide what happened. The FACTS come from the clinic's database \
+and are always true; never contradict them.
+
+FACTS
+{facts}
+
+TRANSCRIPT (AGENT is the clinic; CALLEE is whoever answered)
+{transcript}
+
+Reply with one JSON object and nothing else:
+{{"outcome": one of [{outcomes}],
+ "answered_by": "patient" | "someone_else" | "unclear",
+ "sentiment": "positive" | "neutral" | "negative" | "anxious",
+ "decline_reason": short reason if they declined an appointment, else null,
+ "concerns": list of short concerns or questions the callee raised,
+ "summary": at most two sentences}}
+
+Outcome meanings:
+- booked: an appointment was booked (only if the facts say so)
+- declined: the patient heard the offer and does not want an appointment now
+- callback_requested: they asked to be called back later instead
+- wrong_person: someone other than the patient answered
+- incomplete: the call ended before any decision
+- no_answer, voicemail, rejected: the call never reached a person
+If more than one applies, pick the first in this order: wrong_person, booked, \
+callback_requested, declined, incomplete. So someone else asking for a callback is \
+wrong_person.
+"""
 
 # --- Opik ------------------------------------------------------------------
 OPIK_PROJECT_NAME = "adit-outbound-voice-agent"
