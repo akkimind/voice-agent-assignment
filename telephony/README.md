@@ -48,3 +48,56 @@ Expect `kind` of `SIP`, plus non-empty `sip.callID` and `sip.twilio.callSid`.
 
 A 403 or 603 on a trial account may mean Elastic SIP Trunking termination is
 not enabled until the account is upgraded. That is an account limit, not config.
+
+---
+
+# Phase 7 — real calls with the agent
+
+Once the trunk above works, the agent places calls itself.
+
+## One-time setup
+
+1. Create the trunk, then put its id in `.env`:
+
+   ```shell
+   SIP_OUTBOUND_TRUNK_ID='ST_...'
+   ```
+
+2. Start the worker in one terminal:
+
+   ```shell
+   python agent.py dev
+   ```
+
+## Make a call
+
+```shell
+python dispatch_outbound.py                 # first callable patient, real phone
+python dispatch_outbound.py --patient p-002
+python dispatch_outbound.py --phone +91...  # override the stored number
+python dispatch_outbound.py --browser       # no phone; join the room yourself
+```
+
+The command only starts the agent in a new room. The agent dials from inside
+the room, because it must be there before the phone rings.
+
+## What happens on a call
+
+| Step | Behaviour |
+| --- | --- |
+| Dialling | `wait_until_answered`, so the agent never speaks over the ringtone |
+| Answered | The agent waits ~2.5s for "hello" first, then asks for the patient |
+| Nobody answers | Recorded as `no_answer` or `rejected`, analysed and sent to Opik with no model involved |
+| Goodbye | The agent hangs up ~2s after its closing words |
+| Limits | 30s of ringing, 15 minutes per call |
+
+Phone numbers are masked to their last four digits everywhere they are logged
+or sent to Opik.
+
+## Failure decoder, continued
+
+| SIP status | Recorded outcome |
+| --- | --- |
+| 486, 600, 603 | `rejected` |
+| 404, 408, 480, 487, 604 | `no_answer` |
+| anything else, or no status | `incomplete`, with the error text |

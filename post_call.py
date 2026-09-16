@@ -46,7 +46,10 @@ class CallRecord:
     history: list[dict[str, Any]]                 # ChatContext.to_dict()["items"]
     tool_results: list[dict[str, Any]] = field(default_factory=list)
     log_rows: list[dict[str, Any]] = field(default_factory=list)
-    transport: str = "webrtc"                     # "sip" once phase 7 lands
+    transport: str = "webrtc"                     # "sip" for a real phone call
+    # Set when the phone rang but never became a conversation: busy, declined,
+    # unanswered. There is nothing for a model to read, so none is asked.
+    dial_failure: dict[str, Any] | None = None
 
 
 # --- 1. facts --------------------------------------------------------------------
@@ -206,6 +209,8 @@ def reconcile(known: dict[str, Any], judgement: Judgement | None, transport: str
     callback = known["callback"]["queued"]
 
     if judgement is None:
+        if known.get("dial_failure"):
+            return known["dial_failure"]["outcome"], overrides, flags
         outcome = "booked" if booked else ("unknown" if known["patient_turns"] else "incomplete")
         return outcome, overrides, flags
 
@@ -251,8 +256,10 @@ async def analyze(call: CallRecord, *, conn: sqlite3.Connection | None = None, m
     else:
         known = facts(conn, call)
 
+    if call.dial_failure:
+        known["dial_failure"] = call.dial_failure
     judgement, tokens, error = None, [0, 0], None
-    if known["patient_turns"] > 0:
+    if known["patient_turns"] > 0 and not call.dial_failure:
         try:
             judgement, tokens = await asyncio.wait_for(judge(call, known, model),
                                                        timeout or config.ANALYSIS_TIMEOUT_SECONDS)

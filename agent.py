@@ -45,6 +45,7 @@ import db
 import opik_integration
 import post_call
 import scheduling
+import telephony
 from scheduling import Day, PartOfDay, SchedulingError
 
 load_dotenv(".env")
@@ -1223,12 +1224,61 @@ def _save_transcript_for(room: str, agent: HealthcareAgent, session: AgentSessio
         "room": room,
         "patient": agent.patient,
         "ended_at": datetime.now(timezone.utc).isoformat(),
-        "history": session.history.to_dict(),
+        "history": session.history.to_dict() if session else {"items": []},
         "tool_results": agent.tool_results,
     }
     path.write_text(json.dumps(payload, indent=2, default=str))
     logger.info("transcript saved to %s", path)
     return path
+
+
+FAREWELL = re.compile(r"\b(goodbye|bye now|bye!|take care|have a (great|good|wonderful|nice) (day|evening|morning))\b", re.I)
+# Long enough for the last words to reach the caller before the line drops.
+HANGUP_DELAY_SECONDS = 2.0
+
+
+def _masked(phone: str) -> str:
+    digits = "".join(c for c in phone if c.isdigit())
+    return f"******{digits[-4:]}" if len(digits) >= 4 else "******"
+
+
+def _phone_to_dial(ctx: JobContext, patient: dict[str, Any]) -> str:
+    """The number to ring, or "" for a browser call.
+
+    A dispatched phone job carries {"phone": ...} or {"transport": "sip"} in its
+    metadata; the patient record supplies the number in the second case.
+    """
+    try:
+        meta = json.loads((ctx.job.metadata or "").strip() or "{}")
+    except json.JSONDecodeError:
+        return ""
+    if meta.get("phone"):
+        return str(meta["phone"])
+    return str(patient.get("phone", "")) if meta.get("transport") == "sip" else ""
+
+
+def _hang_up_when_finished(ctx: JobContext, session: AgentSession, log: CallLog) -> None:
+    """End a phone call once the agent has said goodbye.
+
+    Without this the patient is left holding a silent line after the agent's
+    closing words.
+    """
+    def _on_item(ev: Any) -> None:
+        item = getattr(ev, "item", None)
+        if getattr(item, "role", None) != "assistant":
+            return
+        text = (item.text_content or "")
+        if not FAREWELL.search(text):
+            return
+
+        async def _end() -> None:
+            await asyncio.sleep(HANGUP_DELAY_SECONDS)
+            log.event("hangup", reason="agent said goodbye", text=text[:200])
+            await telephony.hang_up(ctx.api, ctx.room.name)
+
+        asyncio.create_task(_end())
+
+    session.on("conversation_item_added", _on_item)
 
 
 # Calls in progress in this process, so the session-end hook can reach them.
@@ -1241,9 +1291,11 @@ async def _analyze_call(room: str, call: dict[str, Any]) -> None:
     transcript = _save_transcript_for(room, agent, session)
     try:
         rows = [json.loads(line) for line in call_log.path.read_text().splitlines() if line.strip()]
-        record = post_call.CallRecord(room=room, patient=agent.patient,
-                                      history=session.history.to_dict()["items"],
-                                      tool_results=agent.tool_results, log_rows=rows)
+        history = session.history.to_dict()["items"] if session else []
+        record = post_call.CallRecord(room=room, patient=agent.patient, history=history,
+                                      tool_results=agent.tool_results, log_rows=rows,
+                                      transport=call.get("transport", "webrtc"),
+                                      dial_failure=call.get("dial_failure"))
         analysis = await post_call.analyze(record)
         TRANSCRIPT_DIR.mkdir(exist_ok=True)
         path = TRANSCRIPT_DIR / f"{room}_{datetime.now(timezone.utc):%Y%m%d_%H%M%S}_analysis.json"
@@ -1271,33 +1323,57 @@ async def _on_session_end(ctx: JobContext) -> None:
 @server.rtc_session(agent_name=AGENT_NAME, on_session_end=_on_session_end)
 async def entrypoint(ctx: JobContext) -> None:
     patient = _select_patient(ctx)
-    logger.info("starting call for %s (%s)", patient["name"], patient["id"])
+    dial_to = _phone_to_dial(ctx, patient)
+    logger.info("starting %s call for %s (%s)", "phone" if dial_to else "browser",
+                patient["name"], patient["id"])
 
     await ctx.connect()
 
     call_log = CallLog(ctx.room.name)
-    call_log.event("call_start", room=ctx.room.name, patient_id=patient["id"])
+    transport = "sip" if dial_to else "webrtc"
+    call_log.event("call_start", room=ctx.room.name, patient_id=patient["id"], transport=transport)
     agent = HealthcareAgent(patient, room_name=ctx.room.name, call_log=call_log)
-    session = _build_session(ctx.proc.userdata["vad"], patient)
-
-    _log_session_events(session, call_log)
-    await session.start(room=ctx.room, agent=agent)
-    call_log.event("session_started")
-
-    # Phase 7 turns this on for SIP calls. Over WebRTC nobody says hello first,
-    # so waiting would only add a pause before the agent speaks.
-    await _open_conversation(session, patient, let_them_speak_first=False)
-
-    _CALLS[ctx.room.name] = {"agent": agent, "session": session, "log": call_log}
+    call: dict[str, Any] = {"agent": agent, "session": None, "log": call_log, "transport": transport}
+    _CALLS[ctx.room.name] = call
 
     async def _on_shutdown() -> None:
-        call = _CALLS.pop(ctx.room.name, None)
-        if call and not call.get("analyzed"):
+        ended = _CALLS.pop(ctx.room.name, None)
+        if ended and not ended.get("analyzed") and ended.get("session"):
             # The session-end hook did not run; keep at least the transcript.
-            _save_transcript_for(ctx.room.name, agent, session)
+            _save_transcript_for(ctx.room.name, agent, ended["session"])
         call_log.close()
 
     ctx.add_shutdown_callback(_on_shutdown)
+
+    if dial_to:
+        # Ring first and wait for an answer: starting the session now would have
+        # the agent talking over the ringtone.
+        started = call_log.event("dial_start", phone=_masked(dial_to))
+        failure = await telephony.dial(ctx.api, telephony.DialRequest(
+            room=ctx.room.name, phone=dial_to, patient_id=patient["id"], trunk_id=telephony.trunk_id()))
+        call_log.event("dial_end", answered=failure is None, outcome=getattr(failure, "outcome", None),
+                       status_code=getattr(failure, "status_code", None),
+                       detail=getattr(failure, "detail", None),
+                       waited_ms=round(call_log.elapsed_ms() - started, 1))
+        if failure is not None:
+            # Nobody spoke, so there is nothing to transcribe or judge; the
+            # attempt is still recorded, analysed and sent to Opik.
+            call["dial_failure"] = {"outcome": failure.outcome, "status_code": failure.status_code,
+                                    "status": failure.status, "detail": failure.detail}
+            await _analyze_call(ctx.room.name, call)
+            return
+
+    session = _build_session(ctx.proc.userdata["vad"], patient)
+    call["session"] = session
+    _log_session_events(session, call_log)
+    if dial_to:
+        _hang_up_when_finished(ctx, session, call_log)
+    await session.start(room=ctx.room, agent=agent)
+    call_log.event("session_started")
+
+    # On a phone call the callee says "hello" first, so the agent waits briefly.
+    # Over WebRTC nobody does, and waiting only delays the opening.
+    await _open_conversation(session, patient, let_them_speak_first=bool(dial_to))
 
 
 if __name__ == "__main__":
