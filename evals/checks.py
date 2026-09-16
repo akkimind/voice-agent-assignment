@@ -10,7 +10,7 @@ from typing import Any
 import config
 
 BOOKED_CLAIM = re.compile(
-    r"you'?re (all )?(set|booked)|i'?ve booked|booked you|is (now )?booked for you|confirmed for|reference", re.I)
+    r"you'?re (all )?(set|booked)|i'?ve booked|booked you|is (now )?booked for you|confirmed for|\breference\b", re.I)
 CLOCK = re.compile(r"\b(\d{1,2})(?::(\d\d))?\s*(a\.?m\.?|p\.?m\.?)", re.I)
 
 

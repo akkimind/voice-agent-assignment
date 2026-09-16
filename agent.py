@@ -154,6 +154,11 @@ def normalize_day(value: Any) -> Any:
         return value
     text = re.sub(r"^(this|next|on)\s+", "", value.strip().lower())
     text = re.sub(r"[\s-]+", "_", text)
+    if text not in ("today", "tomorrow", "day_after_tomorrow", "day_after_offered", *scheduling.WEEKDAYS):
+        # "friday_18_september" or "appointment_on_friday": keep the day, drop the rest.
+        for word in ("day_after_tomorrow", "day_after_offered", "tomorrow", "today", *scheduling.WEEKDAYS):
+            if word in text:
+                return word
     try:
         date = datetime.strptime(text[:10], "%Y_%m_%d").date()
     except ValueError:
@@ -562,6 +567,14 @@ class HealthcareAgent(Agent):
             return None, time, "that day is too far ahead to name"
         return word, time or target.strftime("%H:%M"), None
 
+    def _day_came_from_our_offer(self, ctx: RunContext, requested: datetime) -> bool:
+        """The patient answered an offer with a time and no day, as people do:
+        "we have tomorrow at 9" -> "can you do 12:30?" means 12:30 tomorrow."""
+        if self._last_offered is None or self._last_offered.date() != requested.date():
+            return False
+        offered_at = self._offered_slots.get(scheduling.to_utc_iso(self._last_offered))
+        return offered_at is not None and len(_user_messages(ctx)) > offered_at
+
     def _booking_trusted(self, ctx: RunContext, day: str | None, time: str,
                          requested: datetime, relative: bool) -> bool:
         """The patient chose this slot: said it, accepted it, or asked for an offered
@@ -579,7 +592,10 @@ class HealthcareAgent(Agent):
         said = _user_text(ctx)
         if day_grounded(day, said) and self._offered_clock_answered(ctx, requested):
             return True
-        return slot_grounded(day, time, None, said)
+        if slot_grounded(day, time, None, said):
+            return True
+        # Their words carry the time but no day: take the day from what we offered.
+        return self._day_came_from_our_offer(ctx, requested) and slot_grounded(None, time, None, said)
 
     @staticmethod
     def _callback_values_unsaid(ctx: RunContext, day: str | None, time: str | None,
@@ -622,6 +638,32 @@ class HealthcareAgent(Agent):
                 text = item.text_content or ""
                 return "?" in text and bool(re.search(r"\b(when|time)\b", text, re.I))
         return False
+
+    async def _not_chosen_yet(self, ctx: RunContext, requested: datetime, now: datetime) -> str:
+        """Refusal reply that never sounds like the time is unavailable.
+
+        On a live call the agent turned "the patient has not chosen that time"
+        into "I don't have a 12:30 slot", which was untrue.
+        """
+        def _lookup():
+            with db.session() as conn:
+                free = booking.slot_problem(requested, now) is None and not db.slot_is_booked(
+                    conn, config.DOCTOR["id"], scheduling.to_utc_iso(requested))
+                return free, booking.earliest_free_slot(conn, now=now, not_before=requested)
+
+        free, alternative = await asyncio.to_thread(_lookup)
+        when = scheduling.describe(requested, now)
+        if free:
+            self._remember_offered(ctx, [requested])
+            return (f"Not booked yet, and not because of availability: {when} is free, but they have not "
+                    "said they want it. Ask whether that time works and wait for their answer.")
+        if alternative is None:
+            return (f"Not booked: {when} cannot be booked and nothing is free after it in the next few "
+                    "weeks. Offer a callback.")
+        self._remember_offered(ctx, [alternative])
+        return (f"Not booked: {when} cannot be booked. The earliest free time after it is "
+                f"{scheduling.describe(alternative, now)}. NOT booked yet. Offer that time, say briefly "
+                "why, and wait for their answer.")
 
     def _log(self, tool: str, ok: bool, **detail: Any) -> None:
         self.tool_results.append({"tool": tool, "ok": ok, **json.loads(json.dumps(detail, default=str))})
@@ -830,8 +872,9 @@ class HealthcareAgent(Agent):
         if not relative and time is None and messages and _SPOKEN_CLOCK.search(messages[-1]):
             # In an eval "tomorrow at 10 AM" was searched as "tomorrow" and 9 AM offered.
             self._call_log.event("guard_search_dropped_time", last_user=messages[-1])
-            return ("Not searched: they named a time. Call book_appointment with their day and that time; "
-                    "if it cannot be booked it returns the next free time.")
+            return ("Not searched: they named a time. If they are choosing an appointment, call "
+                    "book_appointment with their day and that time; it returns the next free time if that "
+                    "one cannot be booked. If they are naming a time to be called back, call request_callback.")
         if not relative and (not messages or not PREFERENCE_WORDS.search(messages[-1])):
             # Checked in code because the prompt rule alone did not hold: the model
             # searched and offered a time the moment the patient agreed to book.
@@ -870,7 +913,7 @@ class HealthcareAgent(Agent):
     async def book_appointment(
         self,
         ctx: RunContext,
-        time: str,
+        time: str | None = None,
         day: ApptDayArg | None = None,
         replace_existing: bool = False,
     ) -> str:
@@ -879,7 +922,7 @@ class HealthcareAgent(Agent):
         If that time cannot be booked, it returns the earliest free time after it.
 
         Args:
-            time: 24-hour HH:MM.
+            time: 24-hour HH:MM. Always required; the field is named "time".
             day: The day of the appointment. "day_after_offered" only when they turn down the offered day and want the following one; never to accept an offer.
             replace_existing: True only after they agreed to move their existing appointment.
         """
@@ -888,8 +931,13 @@ class HealthcareAgent(Agent):
         self._tool_finished(call_id, "book_appointment", result)
         return result
 
-    async def _book(self, ctx: RunContext, day: str | None, time: str, replace_existing: bool) -> str:
+    async def _book(self, ctx: RunContext, day: str | None, time: str | None, replace_existing: bool) -> str:
         now = booking.clinic_now()
+        if not time:
+            # The model has sent "slot_time" instead of "time"; a plain answer costs
+            # the same request as a rejected call and tells it what to do.
+            self._call_log.event("guard_missing_time", day=day)
+            return "Not booked: no time was given. Call book_appointment again with time as 24-hour HH:MM."
         relative = day == "day_after_offered"
         if relative:
             resolved_day, resolved_time, problem = self._day_after_offered(day, time)
@@ -914,8 +962,7 @@ class HealthcareAgent(Agent):
             logger.warning("refused ungrounded booking: day=%r time=%r", day, time)
             self._log("book_appointment", False, error="day or time not stated by the patient",
                       day=day, time=time)
-            return ("Not booked: the patient has not chosen that time yet. Ask when suits them "
-                    "and wait for their answer before booking.")
+            return await self._not_chosen_yet(ctx, requested, now)
 
         def _book():
             with db.session() as conn:
@@ -936,7 +983,14 @@ class HealthcareAgent(Agent):
                      f"{out.record['reference']}. Read the time and reference back to the patient.")
             # A patient who books before hearing their results must still hear them.
             # A prompt rule for this was ignored in rehearsal; tool replies are followed.
-            if not results_shared(ctx.session.history.items, self._patient):
+            def _callback_queued():
+                with db.session() as conn:
+                    return conn.execute(
+                        "SELECT 1 FROM callbacks WHERE source_room = ? AND patient_id = ? AND status = 'pending'",
+                        (self._room_name, self._patient["id"])).fetchone() is not None
+
+            # A patient who asked to be called back is busy; results wait for that call.
+            if not results_shared(ctx.session.history.items, self._patient) and not await asyncio.to_thread(_callback_queued):
                 reply += (f" They have not heard their results yet: then tell them their HbA1c is "
                           f"{self._patient['hba1c']}% and fasting blood glucose is "
                           f"{self._patient['blood_glucose']} mg/dL, and that the doctor will go through "
@@ -955,7 +1009,7 @@ class HealthcareAgent(Agent):
     async def request_callback(
         self,
         ctx: RunContext,
-        phrase: str,
+        phrase: str = "",
         requested_by: str = "",
         in_minutes: int | None = None,
         day: DayArg | None = None,

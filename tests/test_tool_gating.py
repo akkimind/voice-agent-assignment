@@ -60,6 +60,11 @@ class DayNormalization(unittest.TestCase):
         wrong = three.replace(year=three.year - 2).isoformat()
         self.assertEqual(normalize_day(wrong), three.strftime("%A").lower())
 
+    def test_day_inside_a_longer_phrase(self):
+        self.assertEqual(normalize_day("Friday 18 September"), "friday")
+        self.assertEqual(normalize_day("appointment on Thursday"), "thursday")
+        self.assertEqual(normalize_day("the day after tomorrow please"), "day_after_tomorrow")
+
     def test_far_dates_and_non_strings_untouched(self):
         far = (booking.clinic_now().date() + timedelta(days=20)).isoformat()
         self.assertEqual(normalize_day(far), far)

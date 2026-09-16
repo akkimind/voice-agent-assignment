@@ -158,8 +158,8 @@ async def run(case: Any, run_no: int) -> Result:
         booked_in_db = bool(turns and turns[-1].appts)
         result.analysis_checks["booking_fact"] = result.analysis["booking_successful"] == booked_in_db
         # The expected outcome only holds if the conversation went as the persona intends.
-        result.analysis_checks["outcome"] = (result.analysis["outcome"] == case.expect_outcome
-                                             if result.status == "pass" and case.expect_outcome else None)
+        result.analysis_checks["outcome"] = (result.analysis["outcome"] in case.expect_outcomes
+                                             if result.status == "pass" and case.expect_outcomes else None)
     result.seconds = round(time.monotonic() - started, 1)
     return result
 

@@ -27,7 +27,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(prog="python -m evals")
     parser.add_argument("--runs", type=int, default=3, help="repeats per case (default 3)")
     parser.add_argument("--only", default="", help="comma-separated persona ids, e.g. S2,S6")
-    parser.add_argument("--workers", type=int, default=4, help="conversations in parallel (default 4)")
+    # Four at once made both providers refuse; three keeps the run under their limits.
+    parser.add_argument("--workers", type=int, default=3, help="conversations in parallel (default 3)")
     args = parser.parse_args()
 
     only = {x.strip() for x in args.only.split(",") if x.strip()}

@@ -64,3 +64,42 @@ class OfferMustBeAnswered(unittest.TestCase):
         self.assertTrue(agent.day_grounded("friday", agent._user_text(ctx)))
         self.assertTrue(a._offered_clock_answered(ctx, at(18, 9)))
         self.assertFalse(a._offered_clock_answered(ctx, at(18, 10)))
+
+
+class DayFromTheOffer(unittest.TestCase):
+    """Answering an offer with only a time: the day comes from what we offered.
+
+    On a live call the agent offered 9 AM tomorrow, the patient asked "you do it
+    for twelve thirty?", and the booking was refused because they never said
+    "tomorrow" themselves.
+    """
+
+    def _agent_and_ctx(self, *user_lines):
+        import agent
+        from types import SimpleNamespace
+        items = [SimpleNamespace(type="message", role="user", text_content=t) for t in user_lines]
+        ctx = SimpleNamespace(session=SimpleNamespace(history=SimpleNamespace(items=items)))
+        a = agent.HealthcareAgent({"id": "p", "name": "Priya Sharma", "pronouns": "she/her",
+                                   "hba1c": 8.2, "blood_glucose": 186})
+        return a, ctx
+
+    def test_time_only_reply_is_trusted_on_the_offered_day(self):
+        from tests.helpers import at
+        a, offered_ctx = self._agent_and_ctx("Yes", "Any")
+        a._remember_offered(offered_ctx, [at(17, 9)])
+        _, ctx = self._agent_and_ctx("Yes", "Any", "You do it for twelve thirty?")
+        self.assertTrue(a._day_came_from_our_offer(ctx, at(17, 12, 30)))
+        self.assertTrue(a._booking_trusted(ctx, "tomorrow", "12:30", at(17, 12, 30), False))
+
+    def test_another_day_still_needs_their_words(self):
+        from tests.helpers import at
+        a, offered_ctx = self._agent_and_ctx("Yes", "Any")
+        a._remember_offered(offered_ctx, [at(17, 9)])
+        _, ctx = self._agent_and_ctx("Yes", "Any", "Can you do twelve thirty?")
+        self.assertFalse(a._booking_trusted(ctx, "friday", "12:30", at(18, 12, 30), False))
+
+    def test_not_trusted_before_the_patient_replies(self):
+        from tests.helpers import at
+        a, ctx = self._agent_and_ctx("Yes", "Any")
+        a._remember_offered(ctx, [at(17, 9)])
+        self.assertFalse(a._day_came_from_our_offer(ctx, at(17, 12, 30)))
