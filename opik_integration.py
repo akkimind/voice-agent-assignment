@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 import config
-from post_call import CallRecord
+from post_call import CallRecord, transcript
 
 logger = logging.getLogger("adit-agent.opik")
 
@@ -174,7 +174,10 @@ def build_payload(call: CallRecord, analysis: dict[str, Any], audio: dict[str, A
     start = _when(next(iter(_rows(call, "call_start")), None))
     return {
         "name": "outbound-call",
-        "input": {"patient": patient, "opening": config.opening_line(call.patient)},
+        # The transcript is on the trace itself, not only in the attachments: an
+        # Opik online rule can read the trace's fields but not its files.
+        "input": {"patient": patient, "opening": config.opening_line(call.patient),
+                  "transcript": transcript(call)},
         "output": {"outcome": analysis["outcome"], "booking": facts.get("booking"),
                    "callback": facts.get("callback"), "summary": (analysis.get("judgement") or {}).get("summary")},
         "metadata": {

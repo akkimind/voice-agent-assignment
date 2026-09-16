@@ -82,6 +82,16 @@ class Payload(unittest.TestCase):
         self.assertEqual(self.payload["input"]["patient"]["phone"], "******3210")
         self.assertNotIn("9876543210", str(self.payload))
 
+    def test_transcript_is_on_the_trace_for_the_online_rule(self):
+        # An Opik rule reads trace fields, never attachments.
+        call = CallRecord(room="call-room", patient=PATIENT, log_rows=LOG_ROWS, history=[
+            {"type": "message", "role": "assistant", "content": ["Hi Priya."]},
+            {"type": "message", "role": "user", "content": ["Tomorrow at ten thirty."]},
+        ])
+        text = oi.build_payload(call, ANALYSIS)["input"]["transcript"]
+        self.assertIn("AGENT: Hi Priya.", text)
+        self.assertIn("CALLEE: Tomorrow at ten thirty.", text)
+
     def test_outcome_and_booking_are_the_trace_output(self):
         self.assertEqual(self.payload["output"]["outcome"], "booked")
         self.assertEqual(self.payload["output"]["booking"]["reference"], "ADT-1")
@@ -144,3 +154,35 @@ class Sending(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OnlineRule(unittest.TestCase):
+    """The rule Opik runs on its own server, checked without network access."""
+
+    def setUp(self):
+        import opik_rules
+        self.rule = opik_rules.definition("project-1")
+        self.code = self.rule["code"]
+
+    def test_scores_the_three_things_we_asked_for(self):
+        names = [s["name"] for s in self.code["schema"]]
+        self.assertEqual(names, ["booking_achieved", "privacy_respected", "professionalism"])
+
+    def test_runs_on_every_call_with_the_free_judge(self):
+        self.assertEqual(self.rule["sampling_rate"], 1.0)
+        self.assertTrue(self.rule["enabled"])
+        # Any other model needs a provider key added to the workspace.
+        self.assertEqual(self.code["model"]["name"], "opik-free-model")
+
+    def test_every_variable_is_a_field_we_actually_send(self):
+        payload = oi.build_payload(a_call(), ANALYSIS)
+        for path in self.code["variables"].values():
+            section, *keys = path.split(".")
+            value = payload[section]
+            for key in keys:
+                self.assertIn(key, value, f"{path} is not in the trace")
+                value = value[key]
+
+    def test_prompt_uses_those_variables(self):
+        for name in self.code["variables"]:
+            self.assertIn("{{" + name + "}}", self.code["messages"][0]["content"])
