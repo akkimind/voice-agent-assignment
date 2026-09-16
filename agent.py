@@ -42,6 +42,7 @@ from call_log import CallLog, NullLog
 import callback_queue
 import config
 import db
+import opik_integration
 import post_call
 import scheduling
 from scheduling import Day, PartOfDay, SchedulingError
@@ -1237,7 +1238,7 @@ _CALLS: dict[str, dict[str, Any]] = {}
 async def _analyze_call(room: str, call: dict[str, Any]) -> None:
     """Save the transcript and the post-call analysis next to it. Never raises."""
     agent, session, call_log = call["agent"], call["session"], call["log"]
-    _save_transcript_for(room, agent, session)
+    transcript = _save_transcript_for(room, agent, session)
     try:
         rows = [json.loads(line) for line in call_log.path.read_text().splitlines() if line.strip()]
         record = post_call.CallRecord(room=room, patient=agent.patient,
@@ -1247,6 +1248,7 @@ async def _analyze_call(room: str, call: dict[str, Any]) -> None:
         TRANSCRIPT_DIR.mkdir(exist_ok=True)
         path = TRANSCRIPT_DIR / f"{room}_{datetime.now(timezone.utc):%Y%m%d_%H%M%S}_analysis.json"
         path.write_text(json.dumps(analysis, indent=2, default=str))
+        opik_integration.send_call(record, analysis, files=[transcript, path, call_log.path])
         call_log.event("analysis_done", outcome=analysis["outcome"],
                        booking_successful=analysis["booking_successful"],
                        flags=analysis["flags"], error=analysis["error"], path=str(path))
