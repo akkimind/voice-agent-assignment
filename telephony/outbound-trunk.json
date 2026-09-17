@@ -1,7 +1,11 @@
 {
   "trunk": {
     "name": "adit-outbound",
-    "address": "REPLACE_WITH_TWILIO_TERMINATION_DOMAIN.pstn.twilio.com",
-    "numbers": ["+15555550100"]
+    "_comment": "address: Plivo termination SIP domain <trunk_id>.zt.plivo.com, or <trunk>.pstn.twilio.com",
+    "address": "REPLACE_WITH_TERMINATION_SIP_DOMAIN",
+    "_numbers": "the caller ID: a number you own or have verified with the provider",
+    "numbers": [
+      "REPLACE_WITH_CALLER_ID_E164"
+    ]
   }
 }

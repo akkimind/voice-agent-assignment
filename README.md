@@ -282,8 +282,10 @@ flow. The agent dials from inside the room, waits for an answer before it
 speaks, and hangs up shortly after saying goodbye. Busy, declined and
 unanswered calls are recorded as outcomes without asking any model.
 
-The code is provider-agnostic: any LiveKit-supported SIP trunk works (Twilio,
-Telnyx, Plivo, Wavix and others). Only the trunk address and credentials change.
+The code is provider-agnostic: any LiveKit-supported SIP trunk works. Plivo is
+the documented default, because its trial needs no credit card and allows calls
+to India; Twilio is covered in the same file. Only the trunk address and
+credentials change.
 
 ---
 
