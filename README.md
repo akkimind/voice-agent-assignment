@@ -29,7 +29,10 @@ nothing in the conversation code knows which one it is.
    and nothing else, ever.
 6. If they are busy or ask to be called later, it asks when and queues a
    callback instead.
-7. After the call: writes a transcript, an analysis and a full event log, and
+7. Never calls a patient who already has an upcoming appointment: the
+   dispatcher, the retry queue and the agent itself all check. Booking also
+   cancels any callback still queued for that patient.
+8. After the call: writes a transcript, an analysis and a full event log, and
    sends one trace to Opik.
 
 ---
@@ -234,7 +237,7 @@ key not configured for LLM" until a provider key is added to the workspace.
 ## Testing
 
 ```shell
-./.venv/bin/python -m unittest        # 175 tests, no network
+./.venv/bin/python -m unittest        # 181 tests, no network
 ./.venv/bin/python -m evals           # simulated patients, real model
 ./.venv/bin/python -m evals --runs 1 --only S2,S6
 ```

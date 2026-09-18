@@ -154,6 +154,8 @@ def schedule_retry(conn: sqlite3.Connection, *, patient: dict[str, Any], now: da
     callback record or why not}. Never raises, because a failed retry must not
     lose the record of the call that prompted it.
     """
+    if db.is_booked(conn, patient["id"], scheduling.to_utc_iso(now)):
+        return {"retried": False, "reason": reason, "why_not": "the patient already has an appointment"}
     delay = config.CALL_RETRY_MINUTES.get(reason)
     if delay is None:
         return {"retried": False, "reason": reason, "why_not": "this reason is not retried"}

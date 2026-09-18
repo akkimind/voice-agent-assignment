@@ -202,10 +202,24 @@ def get_patient(conn: sqlite3.Connection, patient_id: str) -> dict[str, Any]:
     return dict(row)
 
 
-def list_callable_patients(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    """Real patients only; demo calendar fillers are excluded."""
-    rows = conn.execute("SELECT * FROM patients WHERE is_demo_seed = 0 ORDER BY id").fetchall()
+# A patient with an upcoming booked appointment has nothing to be called about.
+_NOT_BOOKED = """NOT EXISTS (SELECT 1 FROM appointments a
+                             WHERE a.patient_id = {alias}.id AND a.status = 'booked'
+                             AND a.slot_start_utc > ?)"""
+
+
+def list_callable_patients(conn: sqlite3.Connection, now_utc: str | None = None) -> list[dict[str, Any]]:
+    """Real patients who may be called: demo calendar fillers are excluded, and so
+    is anyone who already has an upcoming appointment."""
+    now_utc = now_utc or scheduling.to_utc_iso(utc_now())
+    rows = conn.execute(
+        f"SELECT * FROM patients p WHERE is_demo_seed = 0 AND {_NOT_BOOKED.format(alias='p')} ORDER BY id",
+        (now_utc,)).fetchall()
     return [dict(r) for r in rows]
+
+
+def is_booked(conn: sqlite3.Connection, patient_id: str, now_utc: str | None = None) -> bool:
+    return upcoming_appointment(conn, patient_id, now_utc or scheduling.to_utc_iso(utc_now())) is not None
 
 
 # --- Appointments --------------------------------------------------------------
@@ -281,8 +295,11 @@ def due_callbacks(conn: sqlite3.Connection, now_utc: str) -> list[dict[str, Any]
     rows = conn.execute(
         """SELECT c.*, p.name AS patient_name, p.phone FROM callbacks c
            JOIN patients p ON p.id = c.patient_id
-           WHERE c.status = 'pending' AND c.due_utc <= ? ORDER BY c.due_utc""",
-        (now_utc,),
+           WHERE c.status = 'pending' AND c.due_utc <= ?
+             AND NOT EXISTS (SELECT 1 FROM appointments a WHERE a.patient_id = p.id
+                             AND a.status = 'booked' AND a.slot_start_utc > ?)
+           ORDER BY c.due_utc""",
+        (now_utc, now_utc),
     ).fetchall()
     out = []
     for r in rows:

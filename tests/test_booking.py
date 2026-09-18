@@ -16,7 +16,7 @@ NOW = at(13, 14)  # Sunday afternoon
 class Booking(unittest.TestCase):
     def setUp(self):
         self.t = TempDatabase()
-        self.patient, self.arjun = self.t.patient("p-001"), self.t.patient("p-002")
+        self.patient, self.other = self.t.patient("p-001"), self.t.patient("p-002")
 
     def tearDown(self):
         self.t.close()
@@ -45,7 +45,7 @@ class Booking(unittest.TestCase):
 
     def test_two_patients_cannot_take_one_slot(self):
         self.assertEqual(self.book(day="monday", time="11:00").status, "booked")
-        self.assertEqual(self.book(patient=self.arjun, day="monday", time="11:00").status, "unavailable")
+        self.assertEqual(self.book(patient=self.other, day="monday", time="11:00").status, "unavailable")
 
     def test_closed_day(self):
         out = self.book(day="sunday", time="11:00")
@@ -78,13 +78,6 @@ class Booking(unittest.TestCase):
         self.assertEqual(out.status, "has_existing")
         self.assertEqual(out.existing["slot_start_utc"], to_utc_iso(at(14, 11)))
 
-    def test_replace_existing_moves_the_appointment(self):
-        first = self.book(day="monday", time="11:00")
-        out = self.book(day="tuesday", time="10:00", replace_existing=True)
-        self.assertEqual(out.status, "booked")
-        self.assertEqual(out.record["replaced"], first.record["reference"])
-        self.assertFalse(db.slot_is_booked(self.t.conn, config.DOCTOR["id"], to_utc_iso(at(14, 11))))
-
     def test_same_slot_again_is_idempotent(self):
         self.book(day="monday", time="11:00")
         out = self.book(day="monday", time="11:00")
@@ -95,17 +88,16 @@ class Booking(unittest.TestCase):
         with self.assertRaises(sqlite3.IntegrityError):
             db.insert_appointment(self.t.conn, {**rec, "reference": "ADT-DUP", "patient_id": "p-002"})
 
-    def test_lost_race_rolls_back_the_cancellation(self):
-        # Arjun holds Monday 11:00 and asks to move to Monday 16:00, which is taken.
-        # Pretend the availability check missed it, as if another call booked it
-        # between our check and our insert. The unique index must reject the insert,
-        # and her original appointment must survive the rollback.
-        self.book(day="monday", time="11:00")
+    def test_lost_race_writes_nothing(self):
+        # Another patient holds Monday 16:00, but the availability check misses
+        # it, as if they booked between our check and our insert. The unique
+        # index must reject the insert and leave this patient with nothing.
+        self.book(patient=self.other, day="monday", time="11:00")
         with mock.patch.object(db, "slot_is_booked", return_value=False):
-            out = self.book(day="monday", time="16:00", replace_existing=True)
+            out = self.book(day="monday", time="16:00")
         self.assertEqual(out.status, "unavailable")
         self.assertIn("just booked", out.reason)
-        self.assertTrue(db.slot_is_booked(self.t.conn, config.DOCTOR["id"], to_utc_iso(at(14, 11))))
+        self.assertIsNone(db.upcoming_appointment(self.t.conn, self.patient["id"], to_utc_iso(NOW)))
 
     def test_earliest_skips_taken_times(self):
         self.assertEqual(booking.earliest_free_slot(self.t.conn, now=NOW, not_before=at(14, 16)), at(15, 9))

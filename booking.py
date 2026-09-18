@@ -190,7 +190,6 @@ def request_appointment(
     time: str | None = None,
     part_of_day: PartOfDay | None = None,
     notes: str = "",
-    replace_existing: bool = False,
     source_room: str = "",
 ) -> BookingOutcome:
     """Book the requested slot, or explain why not and offer alternatives."""
@@ -218,10 +217,10 @@ def request_appointment(
                 return BookingOutcome("unavailable", requested, problem,
                                       alternatives=_next_after(conn, requested, now))
 
-            if existing and not replace_existing:
-                return BookingOutcome("has_existing", requested, existing=existing)
+            # Booked patients are never called, so this only happens when the
+            # agent tries to book twice in one call. There is no rescheduling.
             if existing:
-                db.cancel_appointment(conn, existing["reference"])
+                return BookingOutcome("has_existing", requested, existing=existing)
 
             record = {
                 "reference": f"ADT-{secrets.token_hex(3).upper()}",
@@ -233,11 +232,12 @@ def request_appointment(
                 "created_utc": scheduling.to_utc_iso(db.utc_now()),
             }
             db.insert_appointment(conn, record)
-            return BookingOutcome("booked", requested, record={**record, "doctor_name": config.DOCTOR["name"],
-                                                               "replaced": existing["reference"] if existing else None})
+            # Booked means nobody needs to ring this patient again.
+            db.supersede_pending_callbacks(conn, patient["id"], record["reference"])
+            return BookingOutcome("booked", requested, record={**record, "doctor_name": config.DOCTOR["name"]})
     except sqlite3.IntegrityError:
-        # Another call took the slot between our check and our insert. The
-        # transaction rolled back, so any cancellation above was undone too.
+        # Another call took the slot between our check and our insert; the
+        # transaction rolled back, so nothing was written.
         return BookingOutcome("unavailable", requested, "someone has just booked that time",
                               alternatives=_next_after(conn, requested, now))
 

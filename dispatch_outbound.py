@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 
 import config
 import db
+import scheduling
 
 AGENT_NAME = "adit-outbound-agent"
 
@@ -37,7 +38,20 @@ async def dispatch(patient_id: str | None, phone: str | None, browser: bool,
 
     with db.session() as conn:
         db.init_db(conn)
-        patient = db.get_patient(conn, patient_id) if patient_id else db.list_callable_patients(conn)[0]
+        if patient_id:
+            patient = db.get_patient(conn, patient_id)
+            booked = db.upcoming_appointment(conn, patient_id, scheduling.to_utc_iso(db.utc_now()))
+            if booked:
+                print(f"{patient['name']} already has an appointment ({booked['reference']}); not calling.",
+                      file=sys.stderr)
+                return 2
+        else:
+            waiting = db.list_callable_patients(conn)
+            if not waiting:
+                print("Nobody is waiting to be called: every patient already has an appointment.",
+                      file=sys.stderr)
+                return 2
+            patient = waiting[0]
 
     metadata = {"patient_id": patient["id"]}
     if not browser:

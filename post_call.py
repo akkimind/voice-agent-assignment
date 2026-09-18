@@ -68,8 +68,6 @@ def facts(conn: sqlite3.Connection, call: CallRecord) -> dict[str, Any]:
     booked = conn.execute(
         "SELECT * FROM appointments WHERE source_room = ? AND patient_id = ? AND status = 'booked' "
         "ORDER BY created_utc DESC LIMIT 1", (call.room, patient_id)).fetchone()
-    replaced = next((r.get("record", {}).get("replaced") for r in call.tool_results
-                     if r.get("tool") == "book_appointment" and r.get("ok") and r.get("record")), None)
     callback = conn.execute(
         "SELECT * FROM callbacks WHERE source_room = ? AND patient_id = ? AND status = 'pending' "
         "ORDER BY created_utc DESC LIMIT 1", (call.room, patient_id)).fetchone()
@@ -91,7 +89,6 @@ def facts(conn: sqlite3.Connection, call: CallRecord) -> dict[str, Any]:
             "booked": booked is not None,
             "reference": booked["reference"] if booked else None,
             "slot_local": _local(booked["slot_start_utc"]) if booked else None,
-            "replaced_reference": replaced if booked else None,
         },
         "callback": {
             "queued": callback is not None,

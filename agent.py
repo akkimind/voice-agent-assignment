@@ -916,7 +916,7 @@ class HealthcareAgent(Agent):
             # They named this exact time and it is free: book it now rather than
             # offering it back and spending a turn and a request on "shall I book?".
             self._call_log.event("booked_from_search", day=day, time=time)
-            return await self._book(ctx, day, time, False)
+            return await self._book(ctx, day, time)
         self._remember_offered(ctx, [slot])
         return _offer(slot, start, now, day, part_of_day)
 
@@ -926,7 +926,6 @@ class HealthcareAgent(Agent):
         ctx: RunContext,
         time: str | None = None,
         day: ApptDayArg | None = None,
-        replace_existing: bool = False,
     ) -> str:
         """Book a specific day and time the patient said or accepted.
 
@@ -935,14 +934,13 @@ class HealthcareAgent(Agent):
         Args:
             time: 24-hour HH:MM. Always required; the field is named "time".
             day: The day of the appointment. "day_after_offered" only when they turn down the offered day and want the following one; never to accept an offer.
-            replace_existing: True only after they agreed to move their existing appointment.
         """
-        call_id = self._tool_started("book_appointment", day=day, time=time, replace_existing=replace_existing)
-        result = await self._book(ctx, day, time, replace_existing)
+        call_id = self._tool_started("book_appointment", day=day, time=time)
+        result = await self._book(ctx, day, time)
         self._tool_finished(call_id, "book_appointment", result)
         return result
 
-    async def _book(self, ctx: RunContext, day: str | None, time: str | None, replace_existing: bool) -> str:
+    async def _book(self, ctx: RunContext, day: str | None, time: str | None) -> str:
         now = booking.clinic_now()
         if not time:
             # The model has sent "slot_time" instead of "time"; a plain answer costs
@@ -979,7 +977,7 @@ class HealthcareAgent(Agent):
             with db.session() as conn:
                 return booking.request_appointment(
                     conn, patient=self._patient, now=now, day=day, time=time,
-                    replace_existing=replace_existing, source_room=self._room_name)
+                    source_room=self._room_name)
 
         out = await asyncio.to_thread(_book)
         self._remember_offered(ctx, out.alternatives)
@@ -1009,9 +1007,8 @@ class HealthcareAgent(Agent):
             return reply
         if out.status == "has_existing":
             existing_at = scheduling.describe(scheduling.from_iso(out.existing["slot_start_utc"]), now)
-            return (f"Not booked, and not because of availability: they already have an appointment "
-                    f"{existing_at}, and each patient has one. Tell them that, and ask whether they want "
-                    "to move it to the new time. If yes, call book_appointment again with replace_existing true.")
+            return (f"Not booked: this patient already has an appointment {existing_at}, booked earlier "
+                    "in this call. Each patient holds one appointment.")
         if not out.alternatives:
             return f"Not booked: {out.reason}. Nothing free after that in the next few weeks. Offer a callback."
         return f"Not booked: {out.reason}. {_offer(out.alternatives[0], out.requested, now, day)}"
@@ -1110,7 +1107,10 @@ def _select_patient(ctx: JobContext) -> dict[str, Any]:
                     return db.get_patient(conn, patient_id)
             except (json.JSONDecodeError, KeyError) as exc:
                 logger.warning("unusable job metadata (%s); falling back", exc)
-        return db.list_callable_patients(conn)[0]
+        callable_patients = db.list_callable_patients(conn)
+    if not callable_patients:
+        raise LookupError("no patient is waiting to be called: everyone already has an appointment")
+    return callable_patients[0]
 
 
 def _name_keyterms(patient: dict[str, Any]) -> list[str]:
@@ -1408,7 +1408,18 @@ async def _on_session_end(ctx: JobContext) -> None:
 
 @server.rtc_session(agent_name=AGENT_NAME, on_session_end=_on_session_end)
 async def entrypoint(ctx: JobContext) -> None:
-    patient = _select_patient(ctx)
+    try:
+        patient = _select_patient(ctx)
+    except LookupError as exc:
+        logger.info("not calling: %s", exc)
+        return
+    with db.session() as conn:
+        booked = db.upcoming_appointment(conn, patient["id"], scheduling.to_utc_iso(db.utc_now()))
+    if booked:
+        # The dispatcher already skips booked patients; this catches a stale job
+        # or a booking made after it was queued. Nobody is dialled or spoken to.
+        logger.info("not calling %s: already booked (%s)", patient["id"], booked["reference"])
+        return
     dial_to = _phone_to_dial(ctx, patient)
     transport = _transport(ctx, dial_to)
     on_phone = transport.startswith("sip")
