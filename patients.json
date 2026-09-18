@@ -1,32 +1,52 @@
 [
   {
     "id": "p-001",
-    "name": "Priya Sharma",
-    "pronouns": "she/her",
+    "name": "Arjun Mehta",
+    "pronouns": "he/him",
     "phone": "+15555550101",
-    "hba1c": 8.2,
-    "blood_glucose": 186,
+    "hba1c": 7.4,
+    "blood_glucose": 142,
     "last_visit": "2026-06-14",
     "timezone": "Asia/Kolkata"
   },
   {
     "id": "p-002",
-    "name": "Arjun Mehta",
-    "pronouns": "he/him",
+    "name": "Kavya Nair",
+    "pronouns": "she/her",
     "phone": "+15555550102",
-    "hba1c": 6.1,
-    "blood_glucose": 118,
+    "hba1c": 5.4,
+    "blood_glucose": 92,
     "last_visit": "2026-07-02",
     "timezone": "Asia/Kolkata"
   },
   {
     "id": "p-003",
-    "name": "Kiran Rao",
+    "name": "Sam Rivera",
     "pronouns": "they/them",
     "phone": "+15555550103",
-    "hba1c": 9.4,
-    "blood_glucose": 232,
+    "hba1c": 9.6,
+    "blood_glucose": 238,
     "last_visit": "2026-05-28",
+    "timezone": "Asia/Kolkata"
+  },
+  {
+    "id": "p-004",
+    "name": "Meera Kapoor",
+    "pronouns": "she/her",
+    "phone": "+15555550104",
+    "hba1c": 6.1,
+    "blood_glucose": 118,
+    "last_visit": "2026-08-09",
+    "timezone": "Asia/Kolkata"
+  },
+  {
+    "id": "p-005",
+    "name": "Rohan Das",
+    "pronouns": "he/him",
+    "phone": "+15555550105",
+    "hba1c": 11.2,
+    "blood_glucose": 310,
+    "last_visit": "2026-04-17",
     "timezone": "Asia/Kolkata"
   }
 ]

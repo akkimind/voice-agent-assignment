@@ -37,13 +37,13 @@ class FakeModel:
 class Facts(unittest.TestCase):
     def setUp(self):
         self.t = TempDatabase()
-        self.priya = self.t.patient("p-001")
+        self.patient = self.t.patient("p-001")
 
     def tearDown(self):
         self.t.close()
 
     def call(self, hist, **kw):
-        return CallRecord(room=ROOM, patient=self.priya, history=hist, **kw)
+        return CallRecord(room=ROOM, patient=self.patient, history=hist, **kw)
 
     def test_booking_comes_from_the_database_not_the_transcript(self):
         # The agent claims a booking, but nothing is in the database.
@@ -51,21 +51,21 @@ class Facts(unittest.TestCase):
         f = post_call.facts(self.t.conn, self.call(hist))
         self.assertFalse(f["booking"]["booked"])
 
-        booking.request_appointment(self.t.conn, patient=self.priya, now=at(13, 14), day="monday",
+        booking.request_appointment(self.t.conn, patient=self.patient, now=at(13, 14), day="monday",
                                     time="11:00", source_room=ROOM)
         f = post_call.facts(self.t.conn, self.call(hist))
         self.assertTrue(f["booking"]["booked"])
         self.assertEqual(f["booking"]["slot_local"], "2026-09-14T11:00+05:30")
 
     def test_bookings_from_other_calls_are_ignored(self):
-        booking.request_appointment(self.t.conn, patient=self.priya, now=at(13, 14), day="monday",
+        booking.request_appointment(self.t.conn, patient=self.patient, now=at(13, 14), day="monday",
                                     time="11:00", source_room="another-room")
         self.assertFalse(post_call.facts(self.t.conn, self.call(history(("user", "hi"))))["booking"]["booked"])
 
     def test_callback_results_and_errors(self):
-        callback_queue.schedule(self.t.conn, patient=self.priya, now=at(13, 14), phrase="in an hour",
+        callback_queue.schedule(self.t.conn, patient=self.patient, now=at(13, 14), phrase="in an hour",
                                 in_minutes=60, source_room=ROOM)
-        hist = history(("assistant", "Your HbA1c is 8.2%."), ("user", "call me later"),
+        hist = history(("assistant", f"Your HbA1c is {self.patient['hba1c']}%."), ("user", "call me later"),
                        calls=[("book_appointment", "Error parsing arguments for `book_appointment`")])
         f = post_call.facts(self.t.conn, self.call(hist, tool_results=[{"tool": "request_callback", "ok": False,
                                                                            "error": "no time"}]))
@@ -108,14 +108,14 @@ class Reconcile(unittest.TestCase):
 class Analyze(unittest.TestCase):
     def setUp(self):
         self.t = TempDatabase()
-        self.priya = self.t.patient("p-001")
+        self.patient = self.t.patient("p-001")
         self.hist = history(("assistant", "Hi"), ("user", "not interested, thanks"))
 
     def tearDown(self):
         self.t.close()
 
     def run_with(self, model):
-        call = CallRecord(room=ROOM, patient=self.priya, history=self.hist)
+        call = CallRecord(room=ROOM, patient=self.patient, history=self.hist)
         original = post_call._complete
 
         async def fake_complete(m, prompt):
@@ -153,7 +153,7 @@ class Analyze(unittest.TestCase):
         self.assertIn("TimeoutError", out["error"])
 
     def test_nobody_spoke_needs_no_model(self):
-        self.hist = history(("assistant", "Hi, may I speak with Priya Sharma, please?"))
+        self.hist = history(("assistant", "Hi, may I speak with Arjun Mehta, please?"))
         out = self.run_with(FakeModel(exc=AssertionError("model must not be called")))
         self.assertEqual(out["outcome"], "incomplete")
         self.assertIsNone(out["error"])

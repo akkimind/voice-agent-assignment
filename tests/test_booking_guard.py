@@ -7,7 +7,7 @@ from agent import slot_grounded
 
 class SlotGrounded(unittest.TestCase):
     def test_invented_slot_rejected(self):
-        self.assertFalse(slot_grounded("tuesday", "10:00", None, "Yes, this is Priya. Sure, let's book."))
+        self.assertFalse(slot_grounded("tuesday", "10:00", None, "Yes, this is Arjun. Sure, let's book."))
 
     def test_stated_slot_accepted(self):
         self.assertTrue(slot_grounded("tuesday", "15:00", None, "Sure. Next Tuesday at 3pm."))
@@ -47,18 +47,18 @@ class OfferMustBeAnswered(unittest.TestCase):
     def test_offer_then_book_in_same_breath_is_not_trusted(self):
         import agent
         from tests.helpers import at
-        a = agent.HealthcareAgent({"id": "p", "name": "Priya Sharma", "pronouns": "she/her",
-                                   "hba1c": 8.2, "blood_glucose": 186})
-        ctx = self._ctx("Yes, it's Priya", "Morning")
+        a = agent.HealthcareAgent({"id": "p", "name": "Arjun Mehta", "pronouns": "he/him",
+                                   "hba1c": 7.4, "blood_glucose": 142})
+        ctx = self._ctx("Yes, it's Arjun", "Morning")
         a._remember_offered(ctx, [at(14, 11, 30)])
         self.assertFalse(a._patient_answered_offer(ctx, at(14, 11, 30)))
-        self.assertTrue(a._patient_answered_offer(self._ctx("Yes, it's Priya", "Morning", "Yes"), at(14, 11, 30)))
+        self.assertTrue(a._patient_answered_offer(self._ctx("Yes, it's Arjun", "Morning", "Yes"), at(14, 11, 30)))
 
     def test_same_time_on_another_day_trusts_the_offered_clock(self):
         import agent
         from tests.helpers import at
-        a = agent.HealthcareAgent({"id": "p", "name": "Priya Sharma", "pronouns": "she/her",
-                                   "hba1c": 8.2, "blood_glucose": 186})
+        a = agent.HealthcareAgent({"id": "p", "name": "Arjun Mehta", "pronouns": "he/him",
+                                   "hba1c": 7.4, "blood_glucose": 142})
         a._remember_offered(self._ctx("Yes"), [at(14, 9)])
         ctx = self._ctx("Yes", "Can we do Friday at that time instead?")
         self.assertTrue(agent.day_grounded("friday", agent._user_text(ctx)))
@@ -79,8 +79,8 @@ class DayFromTheOffer(unittest.TestCase):
         from types import SimpleNamespace
         items = [SimpleNamespace(type="message", role="user", text_content=t) for t in user_lines]
         ctx = SimpleNamespace(session=SimpleNamespace(history=SimpleNamespace(items=items)))
-        a = agent.HealthcareAgent({"id": "p", "name": "Priya Sharma", "pronouns": "she/her",
-                                   "hba1c": 8.2, "blood_glucose": 186})
+        a = agent.HealthcareAgent({"id": "p", "name": "Arjun Mehta", "pronouns": "he/him",
+                                   "hba1c": 7.4, "blood_glucose": 142})
         return a, ctx
 
     def test_time_only_reply_is_trusted_on_the_offered_day(self):

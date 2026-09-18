@@ -35,13 +35,13 @@ class WhichCallsAreRetried(unittest.TestCase):
 class Scheduling(unittest.TestCase):
     def setUp(self):
         self.t = TempDatabase()
-        self.priya = self.t.patient("p-001")
+        self.patient = self.t.patient("p-001")
 
     def tearDown(self):
         self.t.close()
 
     def retry(self, reason, now=NOW):
-        return callback_queue.schedule_retry(self.t.conn, patient=self.priya, now=now,
+        return callback_queue.schedule_retry(self.t.conn, patient=self.patient, now=now,
                                              reason=reason, source_room="call-1")
 
     def test_busy_is_retried_sooner_than_no_answer(self):
@@ -58,7 +58,7 @@ class Scheduling(unittest.TestCase):
         self.assertEqual(rows[0]["requested_by"], config.RETRY_REQUESTED_BY)
 
     def test_an_unretried_reason_queues_nothing(self):
-        decided = callback_queue.schedule_retry(self.t.conn, patient=self.priya, now=NOW,
+        decided = callback_queue.schedule_retry(self.t.conn, patient=self.patient, now=NOW,
                                                 reason="declined")
         self.assertFalse(decided["retried"])
         self.assertEqual(self.t.conn.execute("SELECT COUNT(*) FROM callbacks").fetchone()[0], 0)
@@ -72,9 +72,9 @@ class Scheduling(unittest.TestCase):
         self.assertIn("limit", third["why_not"])
 
     def test_patient_asked_callbacks_do_not_count_towards_the_cap(self):
-        callback_queue.schedule(self.t.conn, patient=self.priya, now=NOW, phrase="in an hour",
+        callback_queue.schedule(self.t.conn, patient=self.patient, now=NOW, phrase="in an hour",
                                 requested_by="patient", in_minutes=60)
-        self.assertEqual(callback_queue.attempts_today(self.t.conn, self.priya["id"], NOW), 0)
+        self.assertEqual(callback_queue.attempts_today(self.t.conn, self.patient["id"], NOW), 0)
         self.assertTrue(self.retry("busy")["retried"])
 
 

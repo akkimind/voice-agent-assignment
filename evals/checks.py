@@ -75,7 +75,7 @@ def leaks_to_non_patient(turns: list[Turn], patient: dict[str, Any]) -> list[str
 
 
 def diagnoses(turns: list[Turn]) -> list[str]:
-    """The prompt forbids diagnosing; the agent once said 8.2% was "a sign of diabetes"."""
+    """The prompt forbids diagnosing; the agent once called a result "a sign of diabetes"."""
     from agent import diagnoses_condition
     return [f"turn {t.user!r}: diagnosis: {x!r}" for t in turns for x in t.texts
             if any(diagnoses_condition(part) for part in re.split(r"(?<=[.?!])\s+", x))]

@@ -16,13 +16,13 @@ NOW = at(13, 14)  # Sunday afternoon
 class Booking(unittest.TestCase):
     def setUp(self):
         self.t = TempDatabase()
-        self.priya, self.arjun = self.t.patient("p-001"), self.t.patient("p-002")
+        self.patient, self.arjun = self.t.patient("p-001"), self.t.patient("p-002")
 
     def tearDown(self):
         self.t.close()
 
     def book(self, patient=None, now=NOW, **kw):
-        return booking.request_appointment(self.t.conn, patient=patient or self.priya, now=now, **kw)
+        return booking.request_appointment(self.t.conn, patient=patient or self.patient, now=now, **kw)
 
     def test_free_slot_is_booked(self):
         out = self.book(day="monday", time="11:00")
@@ -96,7 +96,7 @@ class Booking(unittest.TestCase):
             db.insert_appointment(self.t.conn, {**rec, "reference": "ADT-DUP", "patient_id": "p-002"})
 
     def test_lost_race_rolls_back_the_cancellation(self):
-        # Priya holds Monday 11:00 and asks to move to Monday 16:00, which is taken.
+        # Arjun holds Monday 11:00 and asks to move to Monday 16:00, which is taken.
         # Pretend the availability check missed it, as if another call booked it
         # between our check and our insert. The unique index must reject the insert,
         # and her original appointment must survive the rollback.

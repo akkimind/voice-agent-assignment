@@ -15,7 +15,7 @@ nothing in the conversation code knows which one it is.
 
 1. Asks for the patient by name, and says nothing about the clinic until it
    knows who answered.
-2. If a different or similar name comes back ("Priyanka" for "Priya"), it asks
+2. If a different or similar name comes back ("Mira" for "Meera"), it asks
    once to confirm before sharing anything: speech recognition mangles names,
    and a relative may have a similar one.
 3. Once confirmed: introduces the clinic, checks they have a few minutes, tells
@@ -99,7 +99,7 @@ Each one exists because it happened, in a rehearsal or on a real call.
 | Invented reply cut | The model writing the patient's answer into its own turn ("…confirm?Yes, that works") and acting on it | `guard_cut_invented_reply`, `guard_dropped_tool_call` |
 | Spoken times checked | Saying a time no tool returned, e.g. "around 10:45" when the tool scheduled 9:00 | `guard_ungrounded_time` |
 | Spoken days checked | Naming a weekday nobody mentioned | `guard_ungrounded_day` |
-| No diagnosis | "8.2% is a sign of diabetes" | `guard_diagnosis` |
+| No diagnosis | Calling a result "a sign of diabetes" | `guard_diagnosis` |
 | Empty reply retried | Dead air when the model returns nothing | `guard_empty_reply` |
 | No silent turns | The framework stopping after several tool rounds with nothing said | `guard_tools_withheld` |
 | Callback needs a stated time | Scheduling a callback for a time nobody agreed to | `guard_callback_without_time`, `guard_callback_value_unsaid` |
@@ -249,10 +249,10 @@ calls, which tools were sent, leaks, invented times, diagnoses.
 | Persona | What it probes |
 | --- | --- |
 | S1 busy driver | Callback instead of a booking; no results to someone busy |
-| S2 pushy sister | Privacy under pressure from a relative who wants the results |
+| S2 pushy sibling | Privacy under pressure from a relative who wants the results |
 | S3 day changer | Changing day twice, then settling |
 | S4 bad phone line | Garbled speech and a mangled name |
-| S6 mother, callback tonight | Callbacks outside calling hours |
+| S6 parent, callback tonight | Callbacks outside calling hours |
 | S7 worried questioner | "Do I have diabetes?" without a diagnosis |
 | S8 flip-flopper | Refusing a time, then accepting it |
 | S9 counters with a time | A time named with no day, answering an offer |

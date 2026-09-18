@@ -12,15 +12,15 @@ def at(seconds: int) -> str:
     return datetime(2026, 9, 16, 12, 0, seconds, tzinfo=timezone.utc).isoformat(timespec="milliseconds")
 
 
-PATIENT = {"id": "p-001", "name": "Priya Sharma", "phone": "+919876543210", "hba1c": 8.2, "blood_glucose": 186}
+PATIENT = {"id": "p-001", "name": "Arjun Mehta", "phone": "+15555550101", "hba1c": 7.4, "blood_glucose": 142}
 
 LOG_ROWS = [
     {"event": "call_start", "at": at(0)},
     {"event": "user_turn_committed", "at": at(3), "text": "Yes, speaking."},
     {"event": "llm_request", "at": at(3), "turn": 1, "tool_names": ["request_callback"], "items": 4},
-    {"event": "llm_response", "at": at(4), "turn": 1, "text": "Hi Priya.", "prompt_tokens": 1200,
+    {"event": "llm_response", "at": at(4), "turn": 1, "text": "Hi Arjun.", "prompt_tokens": 1200,
      "completion_tokens": 30, "total_ms": 900},
-    {"event": "tts_done", "at": at(5), "text": "Hi Priya."},
+    {"event": "tts_done", "at": at(5), "text": "Hi Arjun."},
     {"event": "user_turn_committed", "at": at(9), "text": "Tomorrow at ten thirty."},
     {"event": "tool_call", "at": at(10), "seq": 1, "tool": "book_appointment",
      "args": {"day": "tomorrow", "time": "10:30"}},
@@ -80,17 +80,18 @@ class Payload(unittest.TestCase):
         self.payload = oi.build_payload(a_call(), ANALYSIS)
 
     def test_phone_is_masked(self):
-        self.assertEqual(self.payload["input"]["patient"]["phone"], "******3210")
-        self.assertNotIn("9876543210", str(self.payload))
+        digits = PATIENT["phone"].lstrip("+")
+        self.assertEqual(self.payload["input"]["patient"]["phone"], "******" + digits[-4:])
+        self.assertNotIn(digits, str(self.payload))
 
     def test_transcript_is_on_the_trace_for_the_online_rule(self):
         # An Opik rule reads trace fields, never attachments.
         call = CallRecord(room="call-room", patient=PATIENT, log_rows=LOG_ROWS, history=[
-            {"type": "message", "role": "assistant", "content": ["Hi Priya."]},
+            {"type": "message", "role": "assistant", "content": ["Hi Arjun."]},
             {"type": "message", "role": "user", "content": ["Tomorrow at ten thirty."]},
         ])
         text = oi.build_payload(call, ANALYSIS)["input"]["transcript"]
-        self.assertIn("AGENT: Hi Priya.", text)
+        self.assertIn("AGENT: Hi Arjun.", text)
         self.assertIn("CALLEE: Tomorrow at ten thirty.", text)
 
     def test_outcome_and_booking_are_the_trace_output(self):
@@ -103,7 +104,7 @@ class Payload(unittest.TestCase):
         self.assertEqual(names, ["turn 1", "turn 2", "book_appointment", "llm request 1", "post-call analysis"])
         turn = self.payload["spans"][0]
         self.assertEqual(turn["input"], {"patient": "Yes, speaking."})
-        self.assertEqual(turn["output"], {"agent": "Hi Priya."})
+        self.assertEqual(turn["output"], {"agent": "Hi Arjun."})
 
     def test_tool_span_carries_arguments_and_result(self):
         tool = next(s for s in self.payload["spans"] if s["type"] == "tool")

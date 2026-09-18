@@ -28,15 +28,20 @@ def cases() -> dict[str, Any]:
     return {c.id: c for c in personas.PERSONAS}
 
 
-def run_job(case_id: str, run_no: int) -> dict[str, Any]:
+def patient_ids() -> list[str]:
+    import config
+    return [p["id"] for p in config.load_seed_patients()]
+
+
+def run_job(case_id: str, run_no: int, patient_id: str) -> dict[str, Any]:
     """One conversation. A crash (both providers refusing under parallel load)
     is retried once and noted, so load does not read as an agent failure."""
     import asyncio
     from evals import conversation
     case = cases()[case_id]
-    result = conversation.as_dict(asyncio.run(conversation.run(case, run_no)))
+    result = conversation.as_dict(asyncio.run(conversation.run(case, run_no, patient_id)))
     if result["status"] == "crash":
         first = result["errors"][:1]
-        result = conversation.as_dict(asyncio.run(conversation.run(case, run_no)))
+        result = conversation.as_dict(asyncio.run(conversation.run(case, run_no, patient_id)))
         result["errors"].append(f"retried after crash: {first}")
     return result

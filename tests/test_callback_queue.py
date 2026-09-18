@@ -57,7 +57,7 @@ class EarliestAllowed(unittest.TestCase):
 class Queue(unittest.TestCase):
     def setUp(self):
         self.t = TempDatabase()
-        self.priya, self.arjun = self.t.patient("p-001"), self.t.patient("p-002")
+        self.patient, self.arjun = self.t.patient("p-001"), self.t.patient("p-002")
 
     def tearDown(self):
         self.t.close()
@@ -66,32 +66,32 @@ class Queue(unittest.TestCase):
         return cq.schedule(self.t.conn, patient=patient, now=now, phrase="test", **kw)
 
     def test_second_caller_for_same_time_gets_next_slot(self):
-        first = self._schedule(self.priya, at(13, 14), time="16:00")
+        first = self._schedule(self.patient, at(13, 14), time="16:00")
         second = self._schedule(self.arjun, at(13, 14), time="16:00")
         self.assertEqual(first["scheduled"], at(13, 16))
         self.assertEqual(second["scheduled"], at(13, 16, 10))
         self.assertIn("already taken", " ".join(second["moved_because"]))
 
     def test_rerequest_by_same_patient_keeps_its_slot(self):
-        first = self._schedule(self.priya, at(13, 14), time="16:00")
-        again = self._schedule(self.priya, at(13, 14), time="16:00")
+        first = self._schedule(self.patient, at(13, 14), time="16:00")
+        again = self._schedule(self.patient, at(13, 14), time="16:00")
         self.assertEqual(again["scheduled"], at(13, 16))
         self.assertEqual(db.get_callback(self.t.conn, first["reference"])["status"], "superseded")
 
     def test_walking_past_window_end_moves_to_next_morning(self):
-        self._schedule(self.priya, at(13, 14), time="19:50")
+        self._schedule(self.patient, at(13, 14), time="19:50")
         second = self._schedule(self.arjun, at(13, 14), time="19:50")
         self.assertEqual(second["scheduled"], at(14, 9))
         self.assertIn(cq.WINDOW_REASON, second["moved_because"])
 
     def test_database_forbids_two_calls_in_one_slot(self):
-        rec = self._schedule(self.priya, at(13, 14), time="16:00")
+        rec = self._schedule(self.patient, at(13, 14), time="16:00")
         dup = {**rec, "reference": "CB-DUPLICATE", "patient_id": "p-002"}
         with self.assertRaises(sqlite3.IntegrityError):
             db.insert_callback(self.t.conn, dup)
 
     def test_due_returns_only_arrived_entries(self):
-        self._schedule(self.priya, at(13, 14), time="15:00")
+        self._schedule(self.patient, at(13, 14), time="15:00")
         self.assertEqual(cq.due(self.t.conn, at(13, 14, 59).astimezone(timezone.utc)), [])
         ready = cq.due(self.t.conn, at(13, 15).astimezone(timezone.utc))
         self.assertEqual([r["patient_id"] for r in ready], ["p-001"])

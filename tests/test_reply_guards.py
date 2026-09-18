@@ -26,8 +26,8 @@ class InventedReply(unittest.TestCase):
         self.assertEqual(run(["Does that work for you?"])[0], "Does that work for you?")
 
     def test_second_question_is_checked_too(self):
-        out, cutter = run(["Is this Priya? I am calling from the clinic. Is now okay? No, not really, sorry."])
-        self.assertEqual(out, "Is this Priya? I am calling from the clinic. Is now okay?")
+        out, cutter = run(["Is this Arjun? I am calling from the clinic. Is now okay? No, not really, sorry."])
+        self.assertEqual(out, "Is this Arjun? I am calling from the clinic. Is now okay?")
         self.assertTrue(cutter.cut)
 
 
@@ -125,7 +125,7 @@ class SpokenTimes(unittest.TestCase):
         self.assertIn("2:30", g.blocked)
 
     def test_text_without_times_passes(self):
-        text = "Your HbA1c is 8.2%. Would you like to book? Dr. Iyer can see you."
+        text = "Your HbA1c is 7.4%. Would you like to book? Dr. Iyer can see you."
         self.assertEqual(gate(set(), [text])[0], text)
 
 
@@ -140,7 +140,7 @@ class CutterDecidesEarly(unittest.TestCase):
 
 class Diagnosis(unittest.TestCase):
     def test_claims_blocked(self):
-        for s in ("It is a sign of diabetes that your doctor can discuss.", "A result of 8.2% suggests diabetes.",
+        for s in ("It is a sign of diabetes that your doctor can discuss.", "A result of 7.4% suggests diabetes.",
                   "This means you have prediabetes."):
             self.assertTrue(diagnoses_condition(s), s)
 
@@ -150,8 +150,8 @@ class Diagnosis(unittest.TestCase):
             self.assertFalse(diagnoses_condition(s), s)
 
     def test_gate_blocks_diagnosis(self):
-        out, g = gate(set(), ["Your HbA1c is 8.2%. It is a sign of diabetes. Shall we book?"])
-        self.assertEqual(out, "Your HbA1c is 8.2%.")
+        out, g = gate(set(), ["Your HbA1c is 7.4%. It is a sign of diabetes. Shall we book?"])
+        self.assertEqual(out, "Your HbA1c is 7.4%.")
         self.assertEqual(g.reason, "diagnosis")
 
 

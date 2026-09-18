@@ -42,6 +42,7 @@ class Result:
     name: str
     kind: str
     run: int
+    patient_id: str = ""
     status: str = "pass"                 # pass, fail, invalid, crash
     errors: list[str] = field(default_factory=list)
     transcript: list[str] = field(default_factory=list)
@@ -105,12 +106,12 @@ async def _agent_turn(session: AgentSession, log: ListLog, patient_id: str, say:
     return turn
 
 
-async def run(case: Any, run_no: int) -> Result:
-    result = Result(case.id, case.name, case.kind, run_no)
+async def run(case: Any, run_no: int, patient_id: str) -> Result:
+    result = Result(case.id, case.name, case.kind, run_no, patient_id)
     started = time.monotonic()
     with db.session() as conn:
         db.init_db(conn)
-        patient = db.get_patient(conn, "p-001")
+        patient = db.get_patient(conn, patient_id)
     _reset_db()
 
     log = ListLog()
@@ -126,7 +127,7 @@ async def run(case: Any, run_no: int) -> Result:
         async with AgentSession(llm=agent_module._build_llm()) as session:
             await session.start(agent)
             from evals import patient_sim
-            person = patient_sim.SimulatedPerson(case.brief, patient_sim.build_llm())
+            person = patient_sim.SimulatedPerson(case.brief_for(patient), patient_sim.build_llm())
             last_agent = opening
             for _ in range(case.max_turns):
                 say = await person.reply(last_agent)
@@ -141,7 +142,7 @@ async def run(case: Any, run_no: int) -> Result:
                 result.status = "invalid"
                 result.errors.append(f"simulated person never pursued their goal (/{case.valid_if}/)")
             now = booking.clinic_now()
-            result.errors += [e for o in case.outcomes if (e := o(turns, now))]
+            result.errors += [e for o in case.outcomes if (e := o(turns, now, patient))]
 
             record = post_call.CallRecord(room="eval", patient=patient,
                                           history=session.history.to_dict()["items"],

@@ -315,7 +315,7 @@ _DIAGNOSIS = re.compile(
 
 def diagnoses_condition(sentence: str) -> bool:
     """A sentence that tells the patient what condition their results mean. In an
-    eval the agent said 8.2% "is a sign of diabetes". Denials and deferrals to the
+    eval the agent called a patient's result "a sign of diabetes". Denials and deferrals to the
     doctor ("doesn't mean you have diabetes", "only your doctor can say") pass."""
     m = _DIAGNOSIS.search(sentence)
     if not m:
@@ -1150,7 +1150,7 @@ def _build_session(vad: silero.VAD, patient: dict[str, Any]) -> AgentSession:
             model=config.STT_MODEL,
             language="en-US",
             # Bias recognition toward the names this call depends on. Without it,
-            # "Priya Sharma" was heard as "Rias Roma" and the agent wrongly
+            # a patient's name was heard as something unrecognisable and the agent wrongly
             # decided a stranger had answered.
             keyterm=_name_keyterms(patient),
         ),

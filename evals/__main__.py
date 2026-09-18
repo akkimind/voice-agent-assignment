@@ -27,6 +27,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(prog="python -m evals")
     parser.add_argument("--runs", type=int, default=3, help="repeats per case (default 3)")
     parser.add_argument("--only", default="", help="comma-separated persona ids, e.g. S2,S6")
+    parser.add_argument("--patients", default="rotate",
+                        help="rotate (default: each run of a persona meets a different patient), all "
+                             "(every persona with every patient), or comma-separated ids, e.g. p-002,p-005")
     # Four at once made both providers refuse; three keeps the run under their limits.
     parser.add_argument("--workers", type=int, default=3, help="conversations in parallel (default 3)")
     args = parser.parse_args()
@@ -39,7 +42,15 @@ def main() -> int:
         print("No cases match.", file=sys.stderr)
         return 2
     # Interleave by run so rate-limit pressure spreads over the whole run.
-    jobs = [(cid, run) for run in range(1, args.runs + 1) for cid in selected]
+    every = worker.patient_ids()
+    if args.patients == "all":
+        jobs = [(cid, run, pid) for run in range(1, args.runs + 1) for cid in selected for pid in every]
+    else:
+        pool_ids = every if args.patients == "rotate" else [x.strip() for x in args.patients.split(",")]
+        # Rotation: persona i on run r meets patient (i + r), so across runs each
+        # persona sees different patients and each run covers all of them.
+        jobs = [(cid, run, pool_ids[(i + run - 1) % len(pool_ids)])
+                for run in range(1, args.runs + 1) for i, cid in enumerate(selected)]
     print(f"{len(jobs)} conversations ({len(selected)} cases × {args.runs}), {args.workers} in parallel", flush=True)
 
     started = time.monotonic()
@@ -49,15 +60,15 @@ def main() -> int:
                              initializer=worker.init, initargs=(db_dir,)) as pool:
         futures = {pool.submit(worker.run_job, *job): job for job in jobs}
         for done, future in enumerate(as_completed(futures), 1):
-            cid, run = futures[future]
+            cid, run, pid = futures[future]
             try:
                 r = future.result()
             except Exception as exc:
-                r = {"id": cid, "name": "?", "kind": "simulated", "run": run, "status": "crash",
+                r = {"id": cid, "name": "?", "kind": "simulated", "run": run, "patient_id": pid, "status": "crash",
                      "errors": [f"worker: {exc}"], "transcript": [], "guards": [],
                      "agent_tokens": [0, 0], "sim_tokens": [0, 0], "seconds": 0}
             results.append(r)
-            print(f"  [{done}/{len(jobs)}] {MARK[r['status']]} {r['id']:>4} run {r['run']}  {r['seconds']}s", flush=True)
+            print(f"  [{done}/{len(jobs)}] {MARK[r['status']]} {r['id']:>4} run {r['run']} {r.get('patient_id', '')}  {r['seconds']}s", flush=True)
 
     elapsed = time.monotonic() - started
     out = RESULTS_DIR / datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -75,7 +86,7 @@ def _summary(results: list[dict], elapsed: float) -> str:
     by_case: dict[str, list[dict]] = defaultdict(list)
     for r in results:
         by_case[r["id"]].append(r)
-    lines = ["| persona | runs | passed | analysis outcomes | first problem |", "|---|---|---|---|---|"]
+    lines = ["| persona | runs | patients | passed | analysis outcomes | first problem |", "|---|---|---|---|---|---|"]
     for cid, rs in sorted(by_case.items()):
         rs.sort(key=lambda r: r["run"])
         marks = "".join(MARK[r["status"]] for r in rs)
@@ -83,7 +94,8 @@ def _summary(results: list[dict], elapsed: float) -> str:
         valid = sum(r["status"] != "invalid" for r in rs)
         problem = next((e for r in rs if r["status"] != "pass" for e in r["errors"]), "")
         seen = [r["analysis"]["outcome"] if r.get("analysis") else "-" for r in rs]
-        lines.append(f"| {cid} {rs[0]['name']} | {marks} | {passed}/{valid} | {', '.join(seen)} | {problem[:120]} |")
+        who = ", ".join(r.get("patient_id", "") for r in rs)
+        lines.append(f"| {cid} {rs[0]['name']} | {marks} | {who} | {passed}/{valid} | {', '.join(seen)} | {problem[:120]} |")
 
     agent_in = sum(r["agent_tokens"][0] for r in results)
     agent_out = sum(r["agent_tokens"][1] for r in results)
@@ -124,7 +136,7 @@ def _failures(results: list[dict]) -> str:
     for r in sorted(results, key=lambda r: (r["id"], r["run"])):
         if r["status"] == "pass" and all(v is not False for v in r.get("analysis_checks", {}).values()):
             continue
-        parts.append(f"## {r['id']} {r['name']} · run {r['run']} · {r['status']}\n")
+        parts.append(f"## {r['id']} {r['name']} · run {r['run']} · {r.get('patient_id', '')} · {r['status']}\n")
         parts += [f"- {e}" for e in r["errors"]]
         if r.get("analysis"):
             a = r["analysis"]
