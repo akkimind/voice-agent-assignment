@@ -186,3 +186,27 @@ class OnlineRule(unittest.TestCase):
     def test_prompt_uses_those_variables(self):
         for name in self.code["variables"]:
             self.assertIn("{{" + name + "}}", self.code["messages"][0]["content"])
+
+
+class Pluggability(unittest.TestCase):
+    """The assignment asks for Opik as one module plugged in with minimal changes.
+
+    These check the claim structurally: the agent calls the module in exactly
+    one place, and nothing else in the application imports Opik.
+    """
+
+    ROOT = __import__("pathlib").Path(__file__).resolve().parent.parent
+    CORE = ["agent.py", "post_call.py", "booking.py", "callback_queue.py", "scheduling.py",
+            "db.py", "config.py", "call_log.py", "telephony.py", "dispatch_outbound.py"]
+
+    def test_the_agent_calls_opik_in_exactly_one_place(self):
+        import re
+        source = (self.ROOT / "agent.py").read_text()
+        self.assertEqual(len(re.findall(r"\bopik_integration\.\w+\(", source)), 1)
+
+    def test_no_core_module_imports_opik_itself(self):
+        import re
+        for name in self.CORE:
+            source = (self.ROOT / name).read_text()
+            self.assertIsNone(re.search(r"^\s*(import opik\b|from opik\b)", source, re.M),
+                              f"{name} imports opik directly")

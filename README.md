@@ -181,7 +181,7 @@ If the model fails or times out, the record still holds the facts, with outcome
 ## Opik
 
 One function, one call site. `opik_integration.send_call()` is invoked once in
-`agent.py`; delete that line and the agent is unchanged (a test checks this).
+`agent.py`; delete that line and the agent is unchanged. Tests check that this is the only place the agent touches Opik and that no other module imports it.
 
 Each trace carries:
 
@@ -229,7 +229,7 @@ key not configured for LLM" until a provider key is added to the workspace.
 ## Testing
 
 ```shell
-./.venv/bin/python -m unittest        # 148 tests, no network
+./.venv/bin/python -m unittest        # 166 tests, no network
 ./.venv/bin/python -m evals           # simulated patients, real model
 ./.venv/bin/python -m evals --runs 1 --only S2,S6
 ```
