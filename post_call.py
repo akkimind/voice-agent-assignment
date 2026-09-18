@@ -269,6 +269,9 @@ async def analyze(call: CallRecord, *, conn: sqlite3.Connection | None = None, m
     outcome, overrides, flags = reconcile(known, judgement, call.transport)
     return {
         "version": ANALYSIS_VERSION,
+        # True when the carrier refusal was injected rather than real, so a
+        # simulated attempt can never be read as a placed call.
+        "simulated": bool((call.dial_failure or {}).get("simulated")),
         "room": call.room,
         "patient_id": call.patient["id"],
         "analyzed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),

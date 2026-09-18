@@ -275,17 +275,55 @@ provider.
 
 ---
 
-## Phone calls
+## Phone calls: implemented, not funded
 
-See [telephony/README.md](telephony/README.md) for the trunk setup and the call
-flow. The agent dials from inside the room, waits for an answer before it
-speaks, and hangs up shortly after saying goodbye. Busy, declined and
-unanswered calls are recorded as outcomes without asking any model.
+The telephony path is written, unit-tested and documented, but no call has been
+placed over a real line. Every free route to a SIP trunk was blocked by the
+provider, not by the code:
 
-The code is provider-agnostic: any LiveKit-supported SIP trunk works. Plivo is
-the documented default, because its trial needs no credit card and allows calls
-to India; Twilio is covered in the same file. Only the trunk address and
-credentials change.
+| Provider | What happened |
+| --- | --- |
+| Twilio | Account works and the number is verified, but a trial account cannot use Elastic SIP Trunking. `<Dial><Sip>` from Programmable Voice is refused as well: the call connects, Twilio plays an error, and no SIP INVITE ever reaches LiveKit. Verified with authentication removed from the inbound trunk, so credentials were not the cause |
+| Plivo | Signup rejects free email domains, and a company domain too |
+| Sinch | Signup rejects the same addresses, including a university one |
+| LiveKit Phone Numbers | Inbound only; their docs state outbound needs a third-party provider |
+
+Enabling it is a configuration change, not a code change. With any
+LiveKit-supported trunk (Twilio, Telnyx, Plivo, Sinch, Wavix, DIDLogic):
+
+1. Put the trunk address and caller ID in `telephony/outbound-trunk.json`.
+2. Set `SIP_AUTH_USERNAME`, `SIP_AUTH_PASSWORD` and `SIP_OUTBOUND_TRUNK_ID`.
+3. `python dispatch_outbound.py --patient p-001`
+
+See [telephony/README.md](telephony/README.md) for the provider steps and the
+SIP status codes. On a real line the agent dials from inside the room, waits for
+the answer before speaking so it never talks over the ringtone, waits ~2.5s for
+the callee to say hello, and hangs up shortly after its closing words.
+
+### What the phone path does and does not cover
+
+| Behaviour | State |
+| --- | --- |
+| Dialling, answer detection, hangup | Implemented; unit-tested with a stand-in for the network |
+| Busy, declined, unanswered → `rejected` / `no_answer` | Implemented; the mapping is unit-tested, and `--simulate-status` exercises the whole pipeline without a phone |
+| Voicemail | Defined only. Detecting an answering machine needs carrier-side detection, which is a paid feature; nothing in this repo can tell a machine from a person |
+| 8 kHz audio quality, barge-in over a real line | Untested. These are the things only a real call teaches, and they are the honest gap |
+
+### Trying the refused-call paths without a phone
+
+A browser call is always answered, so it cannot produce a carrier status. To
+exercise those paths end to end, inject one:
+
+```shell
+python dispatch_outbound.py --simulate-status 486   # busy      -> rejected
+python dispatch_outbound.py --simulate-status 487   # ring-out  -> no_answer
+```
+
+The agent records the attempt, runs the post-call analysis with no model
+involved (nobody spoke), and sends the Opik trace, exactly as a real refused
+call would. Every such record carries `simulated: true`, in the call log, the
+analysis file and the Opik trace, so a simulated attempt can never be mistaken
+for a real one.
 
 ---
 
@@ -297,10 +335,11 @@ credentials change.
 | Post-call analysis | Working, verified on a live call |
 | Opik trace | Working, verified on the server |
 | Opik online rule | Working: a replayed call was scored automatically |
-| Phone calls | Code complete and unit-tested; blocked on the SIP account |
+| Phone calls | Code complete and unit-tested; blocked on the SIP account, see above |
 | Call recording | Not implemented; the Opik audio field is a reference |
 | Callback dialer | Callbacks are queued, but nothing dials them yet |
-| `no_answer`, `voicemail`, `rejected` | Defined and mapped; only reachable on a real phone line |
+| `no_answer`, `rejected` | Mapped from SIP status; reachable on a real line, or with `--simulate-status` |
+| `voicemail` | Defined only; needs carrier answering-machine detection |
 
 ### Known rough edges
 

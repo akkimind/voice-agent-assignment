@@ -39,6 +39,29 @@ STATUS_OUTCOMES = {
 }
 
 
+# Why a call ended, for deciding whether to try again. Declining is a decision;
+# a wrong number is a data problem; the rest are bad timing.
+RETRY_REASONS = {
+    486: "busy", 600: "busy",
+    408: "no_answer", 480: "no_answer", 487: "no_answer",
+}
+NO_RETRY_REASONS = {
+    603: "declined",          # they rejected the call: calling back is harassment
+    404: "unknown_number",    # the number does not exist
+    604: "unknown_number",
+}
+
+
+def retry_reason(code: int | None) -> str | None:
+    """Why this call should be retried, or None when it should not be."""
+    return RETRY_REASONS.get(code) if code is not None else None
+
+
+def needs_front_desk(code: int | None) -> bool:
+    """A number that cannot be reached at all is for a human to sort out."""
+    return NO_RETRY_REASONS.get(code) == "unknown_number"
+
+
 @dataclass
 class DialRequest:
     room: str
@@ -113,6 +136,15 @@ async def dial(api_client: Any, request: DialRequest) -> DialFailure | None:
                               str(getattr(exc, "sip_status", "") or ""), str(exc)[:300])
         logger.info("call not answered: %s (%s)", failure.outcome, failure.status_code)
         return failure
+
+
+def simulated_failure(code: int) -> DialFailure:
+    """A refused call without a phone, for exercising the paths a browser cannot.
+
+    Always marked simulated, so no record can pass for a real call.
+    """
+    return DialFailure(outcome_for_status(code), code, "simulated",
+                       f"simulated SIP {code}: no call was placed")
 
 
 async def hang_up(api_client: Any, room: str) -> None:

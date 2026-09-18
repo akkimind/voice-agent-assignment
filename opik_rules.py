@@ -28,7 +28,17 @@ RULE_NAME = "call-quality"
 # Naming any other model (a Gemini or OpenAI one) fails with "API key not
 # configured for LLM" until a provider key is added to the workspace.
 JUDGE_MODEL = "opik-free-model"
-SAMPLING_RATE = 1.0   # every call
+SAMPLING_RATE = 1.0   # every call that passes the filters below
+
+# A refused call has no conversation, so judging how the agent spoke is
+# meaningless and drags the professionalism average down. Score only calls that
+# reached a person.
+FILTERS = [
+    {"field": "tags", "operator": "not_contains", "value": "simulated"},
+    {"field": "tags", "operator": "not_contains", "value": "no_answer"},
+    {"field": "tags", "operator": "not_contains", "value": "rejected"},
+    {"field": "tags", "operator": "not_contains", "value": "voicemail"},
+]
 
 # The judge sees only what we map here, taken from the trace's own fields.
 VARIABLES = {
@@ -81,6 +91,7 @@ def definition(project_id: str) -> dict[str, Any]:
         "trigger_scope": "production",
         "action": "evaluator",
         "type": "llm_as_judge",
+        "filters": FILTERS,
         "code": {
             "model": {"name": JUDGE_MODEL, "temperature": 0.0},
             "messages": [{"role": "USER", "content": PROMPT}],

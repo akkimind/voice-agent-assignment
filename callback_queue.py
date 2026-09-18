@@ -137,6 +137,42 @@ def schedule(
     return {**record, "requested": requested, "scheduled": slot}
 
 
+def attempts_today(conn: sqlite3.Connection, patient_id: str, now: datetime) -> int:
+    """Retries already queued for this patient today, in the patient's own day."""
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    rows = conn.execute(
+        "SELECT COUNT(*) FROM callbacks WHERE patient_id = ? AND requested_by = ? AND created_utc >= ?",
+        (patient_id, config.RETRY_REQUESTED_BY, scheduling.to_utc_iso(start))).fetchone()
+    return int(rows[0])
+
+
+def schedule_retry(conn: sqlite3.Connection, *, patient: dict[str, Any], now: datetime,
+                   reason: str, source_room: str = "") -> dict[str, Any]:
+    """Queue another attempt at a call nobody took.
+
+    Returns what was decided, always: {"retried": bool, "reason": ..., plus the
+    callback record or why not}. Never raises, because a failed retry must not
+    lose the record of the call that prompted it.
+    """
+    delay = config.CALL_RETRY_MINUTES.get(reason)
+    if delay is None:
+        return {"retried": False, "reason": reason, "why_not": "this reason is not retried"}
+    # The first attempt counts, so a cap of 3 allows two retries.
+    attempts = attempts_today(conn, patient["id"], now) + 1
+    if attempts >= config.CALL_RETRY_MAX_PER_DAY:
+        return {"retried": False, "reason": reason, "why_not": "daily attempt limit reached",
+                "attempts_today": attempts}
+    try:
+        record = schedule(conn, patient=patient, now=now, phrase=f"retry after {reason}",
+                          requested_by=config.RETRY_REQUESTED_BY, in_minutes=delay,
+                          source_room=source_room)
+    except SchedulingError as exc:
+        return {"retried": False, "reason": reason, "why_not": str(exc)}
+    return {"retried": True, "reason": reason, "in_minutes": delay,
+            "reference": record["reference"], "due_utc": record["due_utc"],
+            "attempts_today": attempts}
+
+
 def due(conn: sqlite3.Connection, now_utc: datetime | None = None) -> list[dict[str, Any]]:
     """Pending callbacks whose time has arrived, oldest first. For the Phase 7 dispatcher."""
     return db.due_callbacks(conn, scheduling.to_utc_iso(now_utc or db.utc_now()))

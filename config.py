@@ -98,6 +98,16 @@ CALLBACK_DEFAULT_DELAY_MINUTES = 120  # caller wants a callback but names no tim
 # 9:10, which is a promise we can keep. The database enforces one call per slot.
 CALLBACK_SLOT_MINUTES = 10
 
+# Retrying a call nobody took. A clinic redials a missed call; it does not
+# redial someone who declined, and it never dials all day.
+CALL_RETRY_MINUTES = {
+    "no_answer": 120,    # rang out: try again after a couple of hours
+    "busy": 30,          # engaged: they have a phone in hand, try sooner
+    "voicemail": 240,    # a machine answered: later the same day
+}
+CALL_RETRY_MAX_PER_DAY = 3      # including the first attempt
+RETRY_REQUESTED_BY = "system: retry"
+
 # What vague parts of the day mean when no clock time is given.
 PART_OF_DAY_TIMES = {"morning": (10, 0), "afternoon": (14, 0), "evening": (18, 0)}
 

@@ -1242,19 +1242,37 @@ def _masked(phone: str) -> str:
     return f"******{digits[-4:]}" if len(digits) >= 4 else "******"
 
 
+def _job_metadata(ctx: JobContext) -> dict[str, Any]:
+    try:
+        return json.loads((ctx.job.metadata or "").strip() or "{}")
+    except json.JSONDecodeError:
+        return {}
+
+
 def _phone_to_dial(ctx: JobContext, patient: dict[str, Any]) -> str:
-    """The number to ring, or "" for a browser call.
+    """The number to ring, or "" when the agent is not the one dialling.
 
     A dispatched phone job carries {"phone": ...} or {"transport": "sip"} in its
     metadata; the patient record supplies the number in the second case.
     """
-    try:
-        meta = json.loads((ctx.job.metadata or "").strip() or "{}")
-    except json.JSONDecodeError:
-        return ""
+    meta = _job_metadata(ctx)
     if meta.get("phone"):
         return str(meta["phone"])
     return str(patient.get("phone", "")) if meta.get("transport") == "sip" else ""
+
+
+def _transport(ctx: JobContext, dial_to: str) -> str:
+    """How the audio reaches the patient.
+
+    - "sip": the agent dials out through an outbound trunk.
+    - "sip_inbound": the call arrives already in progress, because the phone
+      provider bridged it to our inbound trunk. Still a phone call in every way
+      that matters: the callee says hello first, and we hang up at the end.
+    - "webrtc": a browser, for development.
+    """
+    if dial_to:
+        return "sip"
+    return "sip_inbound" if _job_metadata(ctx).get("transport") == "sip_inbound" else "webrtc"
 
 
 def _hang_up_when_finished(ctx: JobContext, session: AgentSession, log: CallLog) -> None:
@@ -1313,6 +1331,29 @@ async def _analyze_call(room: str, call: dict[str, Any]) -> None:
         call["analyzed"] = True
 
 
+async def _retry_after_failure(patient: dict[str, Any], failure: Any, room: str,
+                               log: CallLog) -> dict[str, Any]:
+    """Queue another attempt when nobody took the call. Never raises."""
+    reason = telephony.retry_reason(failure.status_code)
+    if reason is None:
+        decided = {"retried": False, "reason": None,
+                   "why_not": "declined, unknown number, or an unclear status"}
+    else:
+        def _queue():
+            with db.session() as conn:
+                return callback_queue.schedule_retry(
+                    conn, patient=patient, now=callback_queue.patient_now(patient),
+                    reason=reason, source_room=room)
+
+        try:
+            decided = await asyncio.to_thread(_queue)
+        except Exception as exc:
+            logger.exception("could not queue a retry")
+            decided = {"retried": False, "reason": reason, "why_not": f"{type(exc).__name__}: {exc}"}
+    log.event("retry_decision", **decided)
+    return decided
+
+
 async def _on_session_end(ctx: JobContext) -> None:
     # Runs after the session closes and before shutdown callbacks, with a far
     # longer allowance (300 s) than they get (10 s), so analysis fits here.
@@ -1324,13 +1365,13 @@ async def _on_session_end(ctx: JobContext) -> None:
 async def entrypoint(ctx: JobContext) -> None:
     patient = _select_patient(ctx)
     dial_to = _phone_to_dial(ctx, patient)
-    logger.info("starting %s call for %s (%s)", "phone" if dial_to else "browser",
-                patient["name"], patient["id"])
+    transport = _transport(ctx, dial_to)
+    on_phone = transport.startswith("sip")
+    logger.info("starting %s call for %s (%s)", transport, patient["name"], patient["id"])
 
     await ctx.connect()
 
     call_log = CallLog(ctx.room.name)
-    transport = "sip" if dial_to else "webrtc"
     call_log.event("call_start", room=ctx.room.name, patient_id=patient["id"], transport=transport)
     agent = HealthcareAgent(patient, room_name=ctx.room.name, call_log=call_log)
     call: dict[str, Any] = {"agent": agent, "session": None, "log": call_log, "transport": transport}
@@ -1345,12 +1386,15 @@ async def entrypoint(ctx: JobContext) -> None:
 
     ctx.add_shutdown_callback(_on_shutdown)
 
+    simulate = _job_metadata(ctx).get("simulate_status")
     if dial_to:
         # Ring first and wait for an answer: starting the session now would have
         # the agent talking over the ringtone.
-        started = call_log.event("dial_start", phone=_masked(dial_to))
-        failure = await telephony.dial(ctx.api, telephony.DialRequest(
-            room=ctx.room.name, phone=dial_to, patient_id=patient["id"], trunk_id=telephony.trunk_id()))
+        started = call_log.event("dial_start", phone=_masked(dial_to), simulated=bool(simulate))
+        failure = (telephony.simulated_failure(int(simulate)) if simulate
+                   else await telephony.dial(ctx.api, telephony.DialRequest(
+                       room=ctx.room.name, phone=dial_to, patient_id=patient["id"],
+                       trunk_id=telephony.trunk_id())))
         call_log.event("dial_end", answered=failure is None, outcome=getattr(failure, "outcome", None),
                        status_code=getattr(failure, "status_code", None),
                        detail=getattr(failure, "detail", None),
@@ -1359,21 +1403,29 @@ async def entrypoint(ctx: JobContext) -> None:
             # Nobody spoke, so there is nothing to transcribe or judge; the
             # attempt is still recorded, analysed and sent to Opik.
             call["dial_failure"] = {"outcome": failure.outcome, "status_code": failure.status_code,
-                                    "status": failure.status, "detail": failure.detail}
+                                    "status": failure.status, "detail": failure.detail,
+                                    "simulated": bool(simulate),
+                                    "retry": await _retry_after_failure(patient, failure, ctx.room.name, call_log),
+                                    "needs_front_desk": telephony.needs_front_desk(failure.status_code)}
             await _analyze_call(ctx.room.name, call)
             return
+
+    if transport == "sip_inbound":
+        # The phone leg is already up; wait for its audio before speaking.
+        participant = await ctx.wait_for_participant()
+        call_log.event("participant_joined", identity=participant.identity, kind=str(participant.kind))
 
     session = _build_session(ctx.proc.userdata["vad"], patient)
     call["session"] = session
     _log_session_events(session, call_log)
-    if dial_to:
+    if on_phone:
         _hang_up_when_finished(ctx, session, call_log)
     await session.start(room=ctx.room, agent=agent)
     call_log.event("session_started")
 
     # On a phone call the callee says "hello" first, so the agent waits briefly.
     # Over WebRTC nobody does, and waiting only delays the opening.
-    await _open_conversation(session, patient, let_them_speak_first=bool(dial_to))
+    await _open_conversation(session, patient, let_them_speak_first=on_phone)
 
 
 if __name__ == "__main__":

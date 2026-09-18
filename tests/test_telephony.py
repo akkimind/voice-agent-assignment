@@ -160,6 +160,74 @@ class PhoneFromMetadata(unittest.TestCase):
         import agent
         self.assertEqual(agent._masked("+919876543210"), "******3210")
 
+class Transport(unittest.TestCase):
+    """How the agent knows whether it is on a phone, and who dialled."""
+
+    def _ctx(self, metadata):
+        return SimpleNamespace(job=SimpleNamespace(metadata=metadata))
+
+    def test_browser(self):
+        import agent
+        ctx = self._ctx('{"patient_id": "p-001"}')
+        self.assertEqual(agent._transport(ctx, agent._phone_to_dial(ctx, {"phone": "+91..."})), "webrtc")
+
+    def test_agent_dials_out(self):
+        import agent
+        ctx = self._ctx('{"transport": "sip"}')
+        self.assertEqual(agent._transport(ctx, agent._phone_to_dial(ctx, {"phone": "+919876543210"})), "sip")
+
+    def test_call_arrives_already_bridged(self):
+        import agent
+        ctx = self._ctx('{"patient_id": "p-001", "transport": "sip_inbound"}')
+        dial_to = agent._phone_to_dial(ctx, {"phone": "+919876543210"})
+        self.assertEqual(dial_to, "")            # nothing for us to dial
+        self.assertEqual(agent._transport(ctx, dial_to), "sip_inbound")
+
+class SimulatedRefusals(unittest.TestCase):
+    """The paths a browser cannot reach, exercised without a phone."""
+
+    def setUp(self):
+        from tests.helpers import TempDatabase
+        self.t = TempDatabase()
+        self.patient = self.t.patient("p-001")
+
+    def tearDown(self):
+        self.t.close()
+
+    def test_status_becomes_an_outcome_and_is_labelled(self):
+        failure = telephony.simulated_failure(486)
+        self.assertEqual(failure.outcome, "rejected")
+        self.assertEqual(failure.status, "simulated")
+        self.assertIn("simulated", failure.detail)
+
+    def test_record_says_simulated_so_it_cannot_pass_for_a_real_call(self):
+        import post_call
+        failure = telephony.simulated_failure(487)
+        call = CallRecord(room="call-1", patient=self.patient, history=[], transport="sip",
+                          dial_failure={"outcome": failure.outcome, "status_code": failure.status_code,
+                                        "status": failure.status, "detail": failure.detail,
+                                        "simulated": True})
+        result = asyncio.run(post_call.analyze(call, conn=self.t.conn))
+        self.assertEqual(result["outcome"], "no_answer")
+        self.assertTrue(result["simulated"])
+
+    def test_a_real_refusal_is_not_labelled_simulated(self):
+        import post_call
+        call = CallRecord(room="call-1", patient=self.patient, history=[], transport="sip",
+                          dial_failure={"outcome": "rejected", "status_code": 603, "status": "Declined",
+                                        "detail": "", "simulated": False})
+        self.assertFalse(asyncio.run(post_call.analyze(call, conn=self.t.conn))["simulated"])
+
+    def test_opik_trace_is_tagged(self):
+        import opik_integration as oi
+        analysis = {"outcome": "rejected", "booking_successful": False, "simulated": True,
+                    "facts": {"booking": {"booked": False}, "callback": {"queued": False}, "guards": []},
+                    "analysis_tokens": {}, "judgement": None}
+        payload = oi.build_payload(CallRecord(room="call-1", patient=self.patient, history=[],
+                                              transport="sip"), analysis)
+        self.assertIn("simulated", payload["tags"])
+        self.assertTrue(payload["metadata"]["simulated"])
+
 
 if __name__ == "__main__":
     unittest.main()

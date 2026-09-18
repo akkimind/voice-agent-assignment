@@ -191,8 +191,10 @@ def build_payload(call: CallRecord, analysis: dict[str, Any], audio: dict[str, A
             "guards": facts.get("guards"),
             "audio": audio_reference(call, audio),
             "analysis_version": analysis.get("version"),
+            "simulated": bool(analysis.get("simulated")),
         },
-        "tags": ["voice-agent", call.transport, analysis["outcome"]],
+        "tags": (["voice-agent", call.transport, analysis["outcome"]]
+                 + (["simulated"] if analysis.get("simulated") else [])),
         "thread_id": call.room,
         "start_time": start,
         "end_time": _when(call.log_rows[-1]) if call.log_rows else None,

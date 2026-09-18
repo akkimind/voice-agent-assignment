@@ -31,7 +31,8 @@ def _room_name(patient_id: str) -> str:
     return f"call-{patient_id}-{secrets.token_hex(3)}"
 
 
-async def dispatch(patient_id: str | None, phone: str | None, browser: bool) -> int:
+async def dispatch(patient_id: str | None, phone: str | None, browser: bool,
+                   simulate_status: int | None = None) -> int:
     from livekit import api
 
     with db.session() as conn:
@@ -45,7 +46,11 @@ async def dispatch(patient_id: str | None, phone: str | None, browser: bool) -> 
         if not metadata["phone"]:
             print(f"{patient['name']} has no phone number on file", file=sys.stderr)
             return 2
-        if not os.environ.get("SIP_OUTBOUND_TRUNK_ID"):
+        if simulate_status:
+            # No call is placed: the refusal is injected so the recording,
+            # analysis and Opik trace for a refused call can be exercised.
+            metadata["simulate_status"] = simulate_status
+        elif not os.environ.get("SIP_OUTBOUND_TRUNK_ID"):
             print("SIP_OUTBOUND_TRUNK_ID is not set; see telephony/README.md", file=sys.stderr)
             return 2
 
@@ -57,7 +62,9 @@ async def dispatch(patient_id: str | None, phone: str | None, browser: bool) -> 
     finally:
         await lk.aclose()
 
-    where = "the browser" if browser else f"phone ending {str(metadata['phone'])[-4:]}"
+    where = ("the browser" if browser else
+             f"a simulated SIP {simulate_status} refusal" if simulate_status else
+             f"phone ending {str(metadata['phone'])[-4:]}")
     print(f"calling {patient['name']} ({patient['id']}) on {where}")
     print(f"room: {room}")
     print(f"the agent writes logs/{room}_*.jsonl and session_reports/{room}_*.json")
@@ -70,8 +77,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--patient", help=f"patient id, e.g. {config.load_seed_patients()[0]['id']}")
     parser.add_argument("--phone", help="ring this number instead of the stored one")
     parser.add_argument("--browser", action="store_true", help="no phone call; join the room yourself")
+    parser.add_argument("--simulate-status", type=int, metavar="CODE",
+                        help="place no call; record a refusal with this SIP status, e.g. 486 or 487")
     args = parser.parse_args(argv)
-    return asyncio.run(dispatch(args.patient, args.phone, args.browser))
+    return asyncio.run(dispatch(args.patient, args.phone, args.browser, args.simulate_status))
 
 
 if __name__ == "__main__":
