@@ -1362,11 +1362,12 @@ async def _analyze_call(room: str, call: dict[str, Any]) -> None:
                   "seconds": analysis["facts"].get("duration_seconds")} if recording else None)
         # In a thread: the Opik SDK's first import took 17 s and froze the
         # agent's event loop when run here directly.
-        await asyncio.to_thread(opik_integration.send_call, record, analysis, audio=audio,
-                                files=[transcript, path, call_log.path] + ([recording] if recording else []))
+        trace_id = await asyncio.to_thread(opik_integration.send_call, record, analysis, audio=audio,
+                                           files=[transcript, path, call_log.path] + ([recording] if recording else []))
         call_log.event("analysis_done", outcome=analysis["outcome"],
                        booking_successful=analysis["booking_successful"],
-                       flags=analysis["flags"], error=analysis["error"], path=str(path))
+                       flags=analysis["flags"], error=analysis["error"], path=str(path),
+                       opik_trace=trace_id)
         logger.info("call analysis: %s (booking %s) saved to %s",
                     analysis["outcome"], analysis["booking_successful"], path)
     except Exception as exc:

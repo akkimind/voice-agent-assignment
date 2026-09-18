@@ -1,6 +1,6 @@
 # Rework plan: meaning over keywords, measured
 
-Status: **proposed, awaiting approval.** Nothing below has been built yet.
+Status: **approved.** W1–W3 done (baseline: docs/scorecard-baseline.md); W4 next.
 
 ## Why
 

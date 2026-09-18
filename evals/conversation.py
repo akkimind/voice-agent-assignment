@@ -52,6 +52,7 @@ class Result:
     seconds: float = 0.0
     analysis: dict[str, Any] | None = None
     analysis_checks: dict[str, bool | None] = field(default_factory=dict)  # booking_fact, outcome
+    facts: dict[str, Any] = field(default_factory=dict)  # what the scorecard counts; see _facts
 
 
 def _reset_db() -> None:
@@ -142,7 +143,9 @@ async def run(case: Any, run_no: int, patient_id: str) -> Result:
                 result.status = "invalid"
                 result.errors.append(f"simulated person never pursued their goal (/{case.valid_if}/)")
             now = booking.clinic_now()
-            result.errors += [e for o in case.outcomes if (e := o(turns, now, patient))]
+            outcome_errors = [e for o in case.outcomes if (e := o(turns, now, patient))]
+            result.errors += outcome_errors
+            result.facts["outcome_errors"] = len(outcome_errors)
 
             record = post_call.CallRecord(room="eval", patient=patient,
                                           history=session.history.to_dict()["items"],
@@ -152,7 +155,10 @@ async def run(case: Any, run_no: int, patient_id: str) -> Result:
         result.status = "crash"
         result.errors.append(f"{type(exc).__name__}: {exc}")
 
-    result.errors += checks.invariants(turns, patient, answerer=case.answerer)
+    found = checks.violations(turns, patient, answerer=case.answerer)
+    result.errors += [e for errors in found.values() for e in errors]
+    result.facts.update(_facts(turns, log.rows), violations={k: len(v) for k, v in found.items()},
+                        answerer=case.answerer, expect=list(case.expect_outcomes))
     if result.status == "pass" and result.errors:
         result.status = "fail"
     if result.analysis:
@@ -163,6 +169,33 @@ async def run(case: Any, run_no: int, patient_id: str) -> Result:
                                              if result.status == "pass" and case.expect_outcomes else None)
     result.seconds = round(time.monotonic() - started, 1)
     return result
+
+
+# A tool reply that refuses: nothing was searched, booked or scheduled.
+REFUSED = re.compile(r"^(Not |Could not|Error)")
+SEARCH_TOOLS = ("find_earliest_slot",)
+
+
+def _facts(turns: list[Turn], rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Counts the scorecard needs, taken from what happened, not from wording."""
+    calls = [{"tool": name, "turn": i, "refused": bool(REFUSED.match(out)), "rejected": "Error parsing" in out}
+             for i, t in enumerate(turns) for (name, _), out in zip(t.calls, t.outputs)]
+    booked_at = next((i for i, t in enumerate(turns) if t.appts), None)
+    searches = [c for c in calls if c["tool"] in SEARCH_TOOLS and not c["refused"]]
+    first_search = searches[0]["turn"] if searches else None
+    requests = [r for r in rows if r["event"] == "llm_response"]
+    return {
+        "turns": len(turns),
+        "tool_calls": calls,
+        "booked": booked_at is not None,
+        "callback": any(c["status"] == "pending" for c in (turns[-1].cbs if turns else [])),
+        # Searches that led to the booking, and turns from the first one to it.
+        "offers_to_book": sum(c["turn"] <= booked_at for c in searches) if booked_at is not None else None,
+        "turns_to_book": (booked_at - first_search + 1
+                          if booked_at is not None and first_search is not None else None),
+        "prompt_tokens": [r.get("prompt_tokens") or 0 for r in requests],
+        "completion_tokens": [r.get("completion_tokens") or 0 for r in requests],
+    }
 
 
 def as_dict(result: Result) -> dict[str, Any]:
