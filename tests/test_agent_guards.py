@@ -263,6 +263,17 @@ class Booking(unittest.TestCase):
         self.assertIn("closest free", offer)
 
 
+class Approval(unittest.TestCase):
+    def ctx(self, call_id):
+        return SimpleNamespace(function_call=SimpleNamespace(call_id=call_id))
+
+    def test_only_calls_that_passed_the_checks_run(self):
+        a = an_agent()
+        a._approved_calls.add("ok")
+        self.assertIsNone(a._unapproved(self.ctx("ok"), "find_slot"))
+        self.assertIn("not run", a._unapproved(self.ctx("sneaked"), "find_slot"))
+
+
 class Callback(unittest.TestCase):
     def test_no_time_is_refused_until_no_preference_is_said(self):
         a = agent.HealthcareAgent(PATIENT)

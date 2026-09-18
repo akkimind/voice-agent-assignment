@@ -481,6 +481,9 @@ class HealthcareAgent(Agent):
         # repeated day_after_offered refers to that offer rather than adding a day.
         self._last_offer_was_day_after = False
         self.ended = False
+        # Tool calls that passed llm_node's checks. A tool runs only if its call
+        # is here: one provider streamed calls that the checks had dropped.
+        self._approved_calls: set[str] = set()
         # Second opinion on "I am the patient"; tests replace or remove it.
         self.identity_checker = identity_checker
         # Tool results are mirrored here so post-call analysis and the Opik
@@ -529,6 +532,15 @@ class HealthcareAgent(Agent):
         else:
             return None, time, "that day is too far ahead to name"
         return word, time or target.strftime("%H:%M"), None
+
+    def _unapproved(self, ctx: RunContext, tool: str) -> str | None:
+        """A refusal if this call did not pass llm_node's checks."""
+        call = getattr(ctx, "function_call", None)
+        call_id = getattr(call, "call_id", None)
+        if call_id is None or call_id in self._approved_calls:
+            return None
+        self._call_log.event("guard_unapproved_call", tool=tool, call_id=call_id)
+        return "status: not run · reason: one action per response, and only tools on offer"
 
     def _booking_closed(self, ctx: RunContext) -> str | None:
         """Why booking is not open yet, if it is not. Checked inside the tools:
@@ -646,8 +658,17 @@ class HealthcareAgent(Agent):
                         log.event("guard_dropped_tool_call", turn=turn, reason="one call per response",
                                   calls=[{"name": c.name, "arguments": c.arguments} for c in calls[1:]])
                         calls = calls[:1]
+                    offered = {getattr(getattr(t, "info", None), "name", None) for t in tools}
+                    unoffered = [c for c in calls if c.name not in offered]
+                    if unoffered:
+                        # The model has called tools it was not given in this request,
+                        # with arguments it invented. They are not run.
+                        log.event("guard_tool_not_offered", turn=turn,
+                                  calls=[{"name": c.name, "arguments": c.arguments} for c in unoffered])
+                        calls = [c for c in calls if c.name in offered]
                     for call in calls:
                         tool_calls.append({"name": call.name, "arguments": call.arguments})
+                        self._approved_calls.add(call.call_id)
                     if getattr(chunk, "usage", None):
                         usage = chunk.usage
                     if isinstance(chunk, str):
@@ -740,6 +761,8 @@ class HealthcareAgent(Agent):
             is_patient: True only if they confirmed they are the patient themselves.
             name_given: The name they said, if any.
         """
+        if refused := self._unapproved(ctx, "verify_identity"):
+            return refused
         call_id = self._tool_started("verify_identity", is_patient=is_patient, name_given=name_given)
         result = await self._verify(ctx, is_patient, name_given)
         self._tool_finished(call_id, "verify_identity", result)
@@ -816,6 +839,8 @@ class HealthcareAgent(Agent):
             time: A time they named, 24-hour HH:MM.
             window: Where in the clinic day they want to come: early (9 AM to noon), middle (noon to 3 PM) or late (3 to 5 PM, the end of the clinic day).
         """
+        if refused := self._unapproved(ctx, "find_slot"):
+            return refused
         part_of_day = WINDOW_PART_OF_DAY.get(window) if window else None
         call_id = self._tool_started("find_slot", day=day, time=time, window=window)
         result = await self._find(ctx, day, time, part_of_day)
@@ -868,6 +893,8 @@ class HealthcareAgent(Agent):
         Args:
             slot_id: The slot_id find_slot returned.
         """
+        if refused := self._unapproved(ctx, "book_appointment"):
+            return refused
         call_id = self._tool_started("book_appointment", slot_id=slot_id)
         result = await self._book(ctx, slot_id)
         self._tool_finished(call_id, "book_appointment", result)
@@ -935,6 +962,8 @@ class HealthcareAgent(Agent):
             no_preference: They want a callback but have no preferred time.
             phrase: Their words about timing.
         """
+        if refused := self._unapproved(ctx, "request_callback"):
+            return refused
         call_id = self._tool_started("request_callback", requested_by=requested_by, in_minutes=in_minutes,
                                      day=day, time=time, part_of_day=part_of_day,
                                      no_preference=no_preference, phrase=phrase)
@@ -972,6 +1001,8 @@ class HealthcareAgent(Agent):
     @function_tool
     async def end_call(self, ctx: RunContext) -> str:
         """End the call, together with your closing words."""
+        if refused := self._unapproved(ctx, "end_call"):
+            return refused
         call_id = self._tool_started("end_call")
         self.ended = True
         result = "status: ending after your closing words"
