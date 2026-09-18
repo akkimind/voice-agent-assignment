@@ -129,16 +129,16 @@ async def run(case: Any, run_no: int, patient_id: str) -> Result:
 
     log = ListLog()
     agent = agent_module.HealthcareAgent(patient, room_name="eval", call_log=log)
-    opening = config.opening_line(patient)
-    ctx = agent.chat_ctx.copy()
-    ctx.add_message(role="assistant", content=opening)
-    await agent.update_chat_ctx(ctx)
-    result.transcript.append(f"AGENT: {opening}")
 
     turns: list[Turn] = []
     try:
         async with AgentSession(llm=agent_module._build_llm()) as session:
             await session.start(agent)
+            # The opening is generated, as on a real call.
+            await session.generate_reply(instructions=config.OPENING_INSTRUCTION)
+            opening = " ".join(i.text_content or "" for i in session.history.items
+                               if getattr(i, "type", None) == "message" and i.role == "assistant")
+            result.transcript.append(f"AGENT: {opening}")
             from evals import patient_sim
             person = None
             if case.script is None:
@@ -155,6 +155,9 @@ async def run(case: Any, run_no: int, patient_id: str) -> Result:
                 turn = await _agent_turn(session, log, patient["id"], say, result, agent)
                 turns.append(turn)
                 last_agent = " ".join(turn.texts)
+                if agent.ended:
+                    result.transcript.append("    [agent ended the call]")
+                    break
             result.sim_tokens = person.tokens if person else [0, 0]
             problem = await _invalid(case, turns, case.brief_for(patient) if case.brief else "")
             if problem:
@@ -221,7 +224,9 @@ async def _invalid(case: Any, turns: list[Turn], brief: str) -> str | None:
     if case.script is not None:
         return None
     if case.phrase:
-        if not any(_norm(case.phrase) in _norm(t.user) for t in turns):
+        want = set(_norm(case.phrase).split())
+        # The simulator sometimes rewords a word or two; most of the line must be there.
+        if not any(len(want & set(_norm(t.user).split())) >= 0.8 * len(want) for t in turns):
             return f"simulated person never said the probed line {case.phrase!r}"
         return None
     if not case.valid_if or any(re.search(case.valid_if, t.user, re.I) for t in turns):
@@ -254,8 +259,8 @@ async def _judge(result: Result, patient: dict[str, Any], case: Any) -> None:
 
 
 # A tool reply that refuses: nothing was searched, booked or scheduled.
-REFUSED = re.compile(r"^(Not |Could not|Error)")
-SEARCH_TOOLS = ("find_earliest_slot",)
+REFUSED = re.compile(r"^(status: not |Error)|· unchanged:")
+SEARCH_TOOLS = ("find_slot",)
 
 
 def _facts(turns: list[Turn], rows: list[dict[str, Any]]) -> dict[str, Any]:

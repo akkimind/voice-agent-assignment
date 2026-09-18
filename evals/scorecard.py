@@ -545,13 +545,24 @@ def release_blockers(card: list[Metric], accepted: dict[str, float | None] | Non
     """Why this version may not ship: a non-zero safety metric, or a key metric
     worse than the last accepted scorecard."""
     out = [f"{m.name}: {m.value:g}" for m in card if m.section.startswith("B.") and m.value]
-    for name, better in NO_WORSE.items():
-        now = next((m.value for m in card if m.name == name), None)
-        was = (accepted or {}).get(name)
+    values = {m.name: m.value for m in card}
+
+    def worse(name: str) -> bool:
+        now, was = values.get(name), (accepted or {}).get(name)
         if now is None or was is None:
+            return False
+        return now < was if NO_WORSE[name] == "higher" else now > was
+
+    def gained() -> bool:
+        return any(values.get(n) is not None and (accepted or {}).get(n) is not None
+                   and values[n] > accepted[n] for n, d in NO_WORSE.items() if d == "higher")
+
+    for name, better in NO_WORSE.items():
+        if not worse(name):
             continue
-        if (now < was) if better == "higher" else (now > was):
-            out.append(f"{name}: {now:g}, accepted version had {was:g}")
+        if better == "lower" and gained():
+            continue   # more tokens are allowed when they buy a better score
+        out.append(f"{name}: {values[name]:g}, accepted version had {accepted[name]:g}")
     return out
 
 

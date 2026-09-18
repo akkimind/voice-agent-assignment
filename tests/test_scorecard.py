@@ -112,8 +112,8 @@ class Facts(unittest.TestCase):
     def test_searches_and_turns_up_to_the_booking(self):
         appt = [{"slot_start_utc": "x"}]
         turns = [Turn("yes"),
-                 Turn("tomorrow", calls=[("find_earliest_slot", "{}")], outputs=["Earliest free: 10:30"]),
-                 Turn("later", calls=[("find_earliest_slot", "{}")], outputs=["Earliest free: 11:00"]),
+                 Turn("tomorrow", calls=[("find_slot", "{}")], outputs=["Earliest free: 10:30"]),
+                 Turn("later", calls=[("find_slot", "{}")], outputs=["Earliest free: 11:00"]),
                  Turn("ok", calls=[("book_appointment", "{}")], outputs=["Booked"], appts=appt)]
         f = conversation._facts(turns, [{"event": "llm_response", "prompt_tokens": 900}])
         self.assertTrue(f["booked"])
@@ -122,8 +122,8 @@ class Facts(unittest.TestCase):
         self.assertEqual(f["prompt_tokens"], [900])
 
     def test_refused_and_rejected_calls(self):
-        turns = [Turn("x", calls=[("find_earliest_slot", "{}"), ("book_appointment", "")],
-                      outputs=["Not searched: no preference yet.", "Error parsing arguments"])]
+        turns = [Turn("x", calls=[("find_slot", "{}"), ("book_appointment", "")],
+                      outputs=["status: not searched · reason: nothing offered yet", "Error parsing arguments"])]
         calls = conversation._facts(turns, [])["tool_calls"]
         self.assertEqual([c["refused"] for c in calls], [True, True])
         self.assertEqual([c["rejected"] for c in calls], [False, True])
@@ -169,6 +169,10 @@ class ReleaseRule(unittest.TestCase):
         accepted = sc._values(self.card())
         blockers = sc.release_blockers(self.card(success=90.0, tokens=1400), accepted)
         self.assertEqual(len(blockers), 2)
+
+    def test_more_tokens_are_allowed_for_a_better_score(self):
+        accepted = sc._values(self.card(success=90.0))
+        self.assertEqual(sc.release_blockers(self.card(success=95.0, tokens=1400), accepted), [])
 
     def test_better_or_equal_passes(self):
         accepted = sc._values(self.card(success=90.0))

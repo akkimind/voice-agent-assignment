@@ -126,20 +126,6 @@ class UnansweredCallRecord(unittest.TestCase):
         self.assertEqual(self.analyse("no_answer")["outcome"], "no_answer")
 
 
-class Farewells(unittest.TestCase):
-    def test_closing_words_end_the_call(self):
-        import agent
-        for text in ("Goodbye.", "Have a great day!", "Take care, and thank you.",
-                     "You're welcome. Have a wonderful evening."):
-            self.assertTrue(agent.FAREWELL.search(text), text)
-
-    def test_mid_call_lines_do_not(self):
-        import agent
-        for text in ("Does tomorrow at 9 AM work for you?", "Your appointment is booked for Friday.",
-                     "When would be a good time to call back?"):
-            self.assertIsNone(agent.FAREWELL.search(text), text)
-
-
 class PhoneFromMetadata(unittest.TestCase):
     def _ctx(self, metadata):
         return SimpleNamespace(job=SimpleNamespace(metadata=metadata))

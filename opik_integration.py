@@ -168,6 +168,15 @@ def audio_reference(call: CallRecord, audio: dict[str, Any] | None) -> dict[str,
     return {**reference, **(audio or {})}
 
 
+def _opening(call: CallRecord) -> str:
+    """The agent's first words. Generated per call, so read from the call."""
+    for item in call.history:
+        if item.get("type", "message") == "message" and item.get("role") == "assistant":
+            content = item.get("content") or []
+            return " ".join(c for c in content if isinstance(c, str))
+    return ""
+
+
 def build_payload(call: CallRecord, analysis: dict[str, Any], audio: dict[str, Any] | None = None,
                   files: list[Path] | None = None) -> dict[str, Any]:
     """Everything the trace will contain, as plain data so tests can read it."""
@@ -180,7 +189,7 @@ def build_payload(call: CallRecord, analysis: dict[str, Any], audio: dict[str, A
         "name": "outbound-call",
         # The transcript is on the trace itself, not only in the attachments: an
         # Opik online rule can read the trace's fields but not its files.
-        "input": {"patient": patient, "opening": config.opening_line(call.patient),
+        "input": {"patient": patient, "opening": _opening(call),
                   "transcript": transcript(call)},
         "output": {"outcome": analysis["outcome"], "booking": facts.get("booking"),
                    "callback": facts.get("callback"), "summary": (analysis.get("judgement") or {}).get("summary")},

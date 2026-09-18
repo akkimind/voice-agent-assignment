@@ -3,9 +3,9 @@
     python -m evals.from_log logs/<call>.jsonl --id no-then-evening --expect evening
     python -m evals --suite regressions
 
-The patient's lines are taken from the call log and replayed, in order, to the
-agent as it is now. The expectation is what should have happened on that call.
-Replayed lines cannot adapt to a different question, so a regression checks
+The patient's lines are taken from the call log and said again, in order, by
+the simulated caller, each where it fits the agent as it is now. The
+expectation is what should have happened on that call, so a regression checks
 the outcome, not the path.
 """
 
@@ -41,11 +41,20 @@ def load() -> list[dict[str, Any]]:
     return json.loads(FILE.read_text()) if FILE.exists() else []
 
 
+_REPLAY = ("You are {{name}}. On an earlier call you said the lines below, in this order. Say each "
+           "one, word for word, when it answers what the caller has just asked; skip a line that no "
+           "longer fits, and say nothing else of your own unless you must answer a question.\n{lines}")
+
+
 def case(regression_id: str) -> Persona:
+    """A live call's lines, said by the simulated caller in order wherever each
+    fits. A fixed script could not follow a changed flow: after the rework,
+    "No." to "any preference?" landed on "would you like an appointment?"."""
     r = next(x for x in load() if x["id"] == regression_id)
-    return Persona(f"G:{r['id']}", f"replay {r['id']}", r.get("answerer", "patient"), brief="", valid_if="",
-                   outcomes=EXPECT[r["expect"]], suite="regressions", point=r["id"], script=r["lines"],
-                   max_turns=len(r["lines"]))
+    lines = "\n".join(f"- {line}" for line in r["lines"]).replace("{", "{{").replace("}", "}}")
+    return Persona(f"G:{r['id']}", f"replay {r['id']}", r.get("answerer", "patient"),
+                   brief=_REPLAY.format(lines=lines), valid_if="", outcomes=EXPECT[r["expect"]],
+                   suite="regressions", point=r["id"], max_turns=len(r["lines"]) + 4)
 
 
 def main() -> int:

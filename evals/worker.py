@@ -36,7 +36,9 @@ def run_job(suite: str, key: str, phrase: str, run_no: int, patient_id: str) -> 
     patient_id = patient_id if patient_id in ids else sorted(ids)[0]
     result = conversation.as_dict(asyncio.run(conversation.run(case, run_no, patient_id)))
     if result["status"] == "crash":
+        import time
         first = result["errors"][:1]
+        time.sleep(20)   # both providers refused under load; let their limits reset
         result = conversation.as_dict(asyncio.run(conversation.run(case, run_no, patient_id)))
         result["errors"].append(f"retried after crash: {first}")
     return result

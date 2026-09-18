@@ -191,15 +191,21 @@ def request_appointment(
     part_of_day: PartOfDay | None = None,
     notes: str = "",
     source_room: str = "",
+    slot: datetime | None = None,
 ) -> BookingOutcome:
-    """Book the requested slot, or explain why not and offer alternatives."""
-    if time is None:
+    """Book the requested slot, or explain why not and offer alternatives.
+
+    `slot` books an exact moment, as offered by a search; otherwise the slot is
+    worked out from the day and time words."""
+    if slot is not None:
+        requested = slot
+    elif time is None:
         # A day or part of day alone is not a choice of slot. Offer the nearest
         # real one inside it instead of booking on the patient's behalf.
         slot, asked = find_slot(conn, now=now, day=day, time=None, part_of_day=part_of_day)
         return BookingOutcome("needs_time", requested=asked, alternatives=[slot] if slot else [])
-
-    requested = scheduling.requested_datetime(now, day=day, time=time, part_of_day=part_of_day)
+    else:
+        requested = scheduling.requested_datetime(now, day=day, time=time, part_of_day=part_of_day)
     requested_utc = scheduling.to_utc_iso(requested)
 
     try:

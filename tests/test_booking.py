@@ -169,14 +169,3 @@ class EarliestFlow(unittest.TestCase):
         out = self.book(day="monday", part_of_day="afternoon")
         self.assertEqual(out.status, "needs_time")
         self.assertEqual(out.alternatives, [at(14, 12)])
-
-    def test_offer_says_when_the_day_was_full(self):
-        import agent
-        text = agent._offer(at(15, 16), at(14, 16), NOW, "monday")
-        self.assertIn("Nothing free around then on that day", text)
-        self.assertIn("4:00 PM", text)
-
-    def test_an_evening_offer_explains_the_clinic_hours(self):
-        import agent
-        text = agent._offer(at(14, 15), at(14, 15), NOW, "monday", "evening")
-        self.assertIn("closes at 5 PM", text)

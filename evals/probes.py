@@ -57,17 +57,17 @@ POINTS: list[Point] = [
           ["No.", "Whatever works.", "You decide.", "Any day's fine."],
           "You are {name}. " + _CONFIRM + " " + _AGREE + " When asked when suits you, reply with exactly: "
           "\"{line}\". Accept the first time you are offered.",
-          [booked(lambda d: True, "any time")], tool="find_earliest_slot"),
+          [booked(lambda d: True, "any time")], tool="find_slot"),
     Point("evening", "I prefer the late part of the day",
           ["Evenings are better.", "After work, if possible.", "Late in the day."],
           "You are {name}. " + _CONFIRM + " " + _AGREE + " When asked when suits you, reply with exactly: "
           "\"{line}\". Name no day. Refuse any morning time. Accept the latest time you are offered.",
-          [booked(lambda d: d.hour >= 15, "in the clinic's last hours, 3 to 5 PM")], tool="find_earliest_slot"),
+          [booked(lambda d: d.hour >= 15, "in the clinic's last hours, 3 to 5 PM")], tool="find_slot"),
     Point("morning", "I prefer mornings",
           ["Mornings.", "Early in the day works.", "Before lunch, please."],
           "You are {name}. " + _CONFIRM + " " + _AGREE + " When asked when suits you, reply with exactly: "
           "\"{line}\". Name no day. Accept the first morning time you are offered.",
-          [booked(lambda d: d.hour < 12, "in the morning")], tool="find_earliest_slot"),
+          [booked(lambda d: d.hour < 12, "in the morning")], tool="find_slot"),
     Point("day-only", "Friday suits me, any time that day",
           ["Friday.", "Friday's good.", "I can do Friday."],
           "You are {name}. " + _CONFIRM + " " + _AGREE + " When asked when suits you, reply with exactly: "
@@ -88,12 +88,12 @@ POINTS: list[Point] = [
           ["No, that doesn't work.", "Hmm, not that one.", "Can't make that."],
           "You are {name}. " + _CONFIRM + " " + _AGREE + " Ask for the earliest appointment. When the first "
           "time is offered, reply with exactly: \"{line}\". Accept the next time offered.",
-          [other_than_first_offer]),
+          [other_than_first_offer], keep="no day and no time: it turns down whatever was offered"),
     Point("accept-offer", "yes, book that time",
           ["Sure, book it.", "That works.", "Perfect."],
           "You are {name}. " + _CONFIRM + " " + _AGREE + " Ask for the earliest appointment. When a time is "
           "offered, reply with exactly: \"{line}\".",
-          [first_offer_booked], tool="book_appointment"),
+          [first_offer_booked], tool="book_appointment", keep="no day and no time: it accepts whatever was offered"),
     Point("decline-visit", "I don't want an appointment",
           ["No thanks.", "I'll pass.", "Not interested in seeing anyone."],
           "You are {name}. " + _CONFIRM + " Listen to your results. When asked about seeing a doctor, reply "
@@ -111,10 +111,10 @@ ASKED = {
     "evening": "When would suit you for the appointment?",
     "morning": "When would suit you for the appointment?",
     "day-only": "When would suit you for the appointment?",
-    "time-no-day": "The earliest we have is tomorrow at 10:30. Does that work?",
+    "time-no-day": "We have a slot then. Does that work for you?",
     "after-hours": "When would suit you for the appointment?",
-    "decline-offer": "The earliest we have is tomorrow at 10:30. Does that work?",
-    "accept-offer": "The earliest we have is tomorrow at 10:30. Does that work?",
+    "decline-offer": "We have a slot then. Does that work for you?",
+    "accept-offer": "We have a slot then. Does that work for you?",
     "decline-visit": "Would you like to book a consultation with a doctor?",
 }
 
