@@ -436,8 +436,9 @@ PART_OF_DAY_SYNONYMS = {"evening": {"tonight", "night"}, "afternoon": {"lunch", 
 PREFERENCE_WORDS = re.compile(
     r"\b(earliest|soonest|soon|asap|first|any|anytime|whenever|pick|choose|decide|up to you|"
     r"(doesn'?t|does not) matter|no preference|available|free|open|next|after|instead|another|"
-    r"other|different|later|earlier|week|today|tomorrow|morning|afternoon|evening|noon|"
-    r"monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d+)\b", re.I)
+    r"other|different|later|earlier|week|weekend|weekday|today|tonight|tomorrow|morning|"
+    r"afternoon|evening|night|noon|lunch|monday|tuesday|wednesday|thursday|friday|saturday|"
+    r"sunday|\d+)s?\b", re.I)   # "evenings", "mornings", "Mondays" count too
 
 
 MAX_TOOL_RESULTS_PER_TURN = 2
@@ -482,17 +483,24 @@ def results_shared(items: list[Any], patient: dict[str, Any]) -> bool:
                and any(v in (item.text_content or "") for v in values) for item in items)
 
 
-def _offer(slot: datetime, start: datetime, now: datetime, day: str | None) -> str:
+EVENING_NOTE = (f"The clinic closes at {scheduling.hour_phrase(config.CLINIC_CLOSE_HOUR)}, so evening "
+                "appointments are its last slots of the day. Say so briefly. ")
+
+
+def _offer(slot: datetime, start: datetime, now: datetime, day: str | None,
+           part_of_day: str | None = None) -> str:
     """Tool reply offering exactly one slot. It always says nothing is booked yet:
     the model once offered a time and announced it as booked in the same reply."""
     when = scheduling.describe(slot, now)
+    note = EVENING_NOTE if part_of_day == "evening" else ""
     if slot == start:
-        return (f"{when} is free. NOT booked yet. If they asked for exactly this time, call "
+        return (f"{note}{when} is free. NOT booked yet. If they asked for exactly this time, call "
                 "book_appointment now. Otherwise offer it and wait for their yes.")
-    if day is not None and slot.date() != start.date():
-        return (f"Nothing free on that day. The earliest after it is {when}. NOT booked yet. "
-                "Offer only this time, ask if it works, and wait for their answer.")
-    return (f"The earliest free time is {when}. NOT booked yet. Offer only this time, ask if it "
+    if slot.date() != start.date() and (day is not None or part_of_day is not None):
+        return (f"{note}Nothing free around then on that day. The nearest, at a similar time on "
+                f"another day, is {when}. NOT booked yet. Offer only this time, ask if it works, "
+                "and wait for their answer.")
+    return (f"{note}The nearest free time is {when}. NOT booked yet. Offer only this time, ask if it "
             "works, and wait for their answer.")
 
 
@@ -652,7 +660,7 @@ class HealthcareAgent(Agent):
             with db.session() as conn:
                 free = booking.slot_problem(requested, now) is None and not db.slot_is_booked(
                     conn, config.DOCTOR["id"], scheduling.to_utc_iso(requested))
-                return free, booking.earliest_free_slot(conn, now=now, not_before=requested)
+                return free, booking.nearest_free_slot(conn, now=now, pref=booking.around(requested))
 
         free, alternative = await asyncio.to_thread(_lookup)
         when = scheduling.describe(requested, now)
@@ -849,10 +857,11 @@ class HealthcareAgent(Agent):
         time: str | None = None,
         part_of_day: PartOfDayArg = None,
     ) -> str:
-        """Find the earliest free appointment at or after a point in time.
+        """Find the free appointment closest to when the patient wants to come.
 
         Use when the patient has no preference, names only a day or part of the
-        day, or turns down an offered time. Leave every field empty for the
+        day, or turns down an offered time. If that day is full it keeps the time
+        of day and tries the next open day. Leave every field empty for the
         earliest overall.
 
         Args:
@@ -885,23 +894,22 @@ class HealthcareAgent(Agent):
             return ("Not searched: the patient has not said when suits them yet. Ask when would suit "
                     "them for the appointment and wait for their answer.")
         now = booking.clinic_now()
-        try:
-            start = booking.search_start(now, day=day, time=time, part_of_day=part_of_day)
-        except SchedulingError as exc:
-            return f"Could not search: {exc}. Ask the patient to repeat when."
 
         def _lookup():
             with db.session() as conn:
-                return booking.earliest_free_slot(conn, now=now, not_before=start)
+                return booking.find_slot(conn, now=now, day=day, time=time, part_of_day=part_of_day)
 
-        slot = await asyncio.to_thread(_lookup)
+        try:
+            slot, start = await asyncio.to_thread(_lookup)
+        except SchedulingError as exc:
+            return f"Could not search: {exc}. Ask the patient to repeat when."
         self._log("find_earliest_slot", slot is not None, day=day, time=time, part_of_day=part_of_day, slot=slot)
         if slot is None:
             return "Nothing free in the next few weeks. Offer a callback instead."
         if relative:
             self._remember_offered(ctx, [slot], from_day_after=True)
             when = scheduling.describe(slot, now)
-            lead = "" if slot == start else "Nothing free at that time. The earliest after it is "
+            lead = "" if slot == start else "Nothing free at that time. The nearest is "
             return (f"{lead}{when}. NOT booked yet. Say that day and time to the patient and ask "
                     "if it works, then wait for their answer.")
         if slot == start and time is not None and self._booking_trusted(ctx, day, time, slot, False):
@@ -910,7 +918,7 @@ class HealthcareAgent(Agent):
             self._call_log.event("booked_from_search", day=day, time=time)
             return await self._book(ctx, day, time, False)
         self._remember_offered(ctx, [slot])
-        return _offer(slot, start, now, day)
+        return _offer(slot, start, now, day, part_of_day)
 
     @function_tool
     async def book_appointment(

@@ -66,8 +66,13 @@ APPOINTMENT_MAX_DAYS_AHEAD = 30
 
 DOCTOR = {"id": "d-001", "name": "Dr. Ananya Iyer"}
 
-# Where a search starts when the patient names only a part of the day.
-PART_OF_DAY_RANGES = {"morning": (9, 12), "afternoon": (12, 17), "evening": (17, 21)}
+# What a part of the day means for an APPOINTMENT, as clinic hours. The clinic
+# closes at 17:00, so "evening" is its last slots: a patient who asked for an
+# evening was once offered the next morning, because 17:00-21:00 has no slots.
+# Callbacks are phone calls and keep their own evening (PART_OF_DAY_TIMES).
+APPOINTMENT_PART_OF_DAY = {"morning": (9, 12), "afternoon": (12, 17), "evening": (15, 17)}
+# How far from a named time an offer may be, before trying the next day.
+APPOINTMENT_AROUND_MINUTES = 60
 
 
 # --- Call outcomes ---------------------------------------------------------

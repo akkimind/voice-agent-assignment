@@ -93,7 +93,8 @@ class PreferenceBeforeSearch(unittest.TestCase):
 
     def test_preferences(self):
         for text in ("Whatever is earliest, you pick.", "Can we do the next day instead?", "Friday",
-                     "tomorrow morning", "any time is fine", "it doesn't matter", "at 3"):
+                     "tomorrow morning", "any time is fine", "it doesn't matter", "at 3",
+                     "No. But I would prefer evenings slot.", "Mondays are good", "weekends"):
             self.assertTrue(PREFERENCE_WORDS.search(text), text)
 
 

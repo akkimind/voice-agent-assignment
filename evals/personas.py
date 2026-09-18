@@ -126,6 +126,14 @@ PERSONAS: list[Persona] = [
             [booked(lambda d: d.date() == (datetime.now(d.tzinfo) + timedelta(days=1)).date(),
                     "on the offered day")],
             expect_outcomes=("booked",)),
+    Persona("S10", "evening person", "patient",
+            "You are Priya Sharma. Confirm it is you and that you have time. Listen to your results and agree "
+            "to see a doctor. When asked when suits you, say you would prefer an evening slot, in exactly those "
+            "words or close to them, and name no day. If offered a morning time, refuse and say you work in the "
+            "mornings. Accept the latest time of day you are offered.",
+            r"evening",
+            [booked(lambda d: d.hour >= 15, "in the clinic's evening, 3 to 5 PM")],
+            expect_outcomes=("booked",)),
     Persona("S8", "flip-flopper", "patient",
             "You are Priya Sharma. Confirm it is you and that you have time. Agree to see a doctor and ask for "
             "tomorrow at 10 AM. If that is not available, first say 'hmm, no, that doesn't work', then a moment "

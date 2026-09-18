@@ -6,8 +6,9 @@ flow for every request:
 1. Resolve the patient's structured request into a slot in clinic time.
 2. Under the database write lock, check the slot is valid and free, and that
    the patient has no other upcoming appointment.
-3. If anything fails, book nothing and return the earliest free slot after
-   the requested time so the agent can offer it. Nothing is ever silently rounded or moved.
+3. If anything fails, book nothing and return the closest free slot to the
+   requested time, keeping its time of day, so the agent can offer it. Nothing
+   is ever silently rounded or moved.
 
 The unique index in db.py is the final guard: even if two processes raced past
 the checks, the second INSERT would fail.
@@ -18,7 +19,7 @@ from __future__ import annotations
 import secrets
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Iterator, Literal
 from zoneinfo import ZoneInfo
 
@@ -105,17 +106,79 @@ def earliest_free_slot(conn: sqlite3.Connection, *, now: datetime, not_before: d
     return free[0] if free else None
 
 
-def search_start(now: datetime, *, day: Day | None, time: str | None,
-                 part_of_day: PartOfDay | None) -> datetime:
-    """Where a search for the earliest slot begins, from the patient's words."""
+OPEN_MIN = config.CLINIC_OPEN_HOUR * 60
+CLOSE_MIN = config.CLINIC_CLOSE_HOUR * 60
+LAST_START_MIN = CLOSE_MIN - config.APPOINTMENT_SLOT_MINUTES
+
+
+@dataclass
+class Preference:
+    """When in the day the patient wants to come, and from which day to look.
+
+    Slot start times between lo (inclusive) and hi (exclusive), in minutes since
+    midnight, closest to target first. A full day moves the search to the next
+    open day, keeping the time of day: "tomorrow evening", if tomorrow's evening
+    is full, becomes the day after's evening, not the next morning.
+    """
+    first_day: date
+    lo: int
+    hi: int
+    target: int
+
+    def anchor(self, tz) -> datetime:
+        """The moment the patient asked for, for comparing with what we found."""
+        return datetime(self.first_day.year, self.first_day.month, self.first_day.day,
+                        self.target // 60, self.target % 60, tzinfo=tz)
+
+
+def _minutes(moment: datetime) -> int:
+    return moment.hour * 60 + moment.minute
+
+
+def around(moment: datetime) -> Preference:
+    """A named time: an hour either side, pulled inside clinic hours, so "6 PM"
+    means the last slots of that day."""
+    target = min(max(_minutes(moment), OPEN_MIN), LAST_START_MIN)
+    spread = config.APPOINTMENT_AROUND_MINUTES
+    return Preference(moment.date(), max(OPEN_MIN, target - spread),
+                      min(CLOSE_MIN, target + spread + 1), target)
+
+
+def preference(now: datetime, *, day: Day | None, time: str | None,
+               part_of_day: PartOfDay | None) -> Preference | None:
+    """From the patient's words; None when they have no preference at all."""
     if time is not None:
-        return scheduling.requested_datetime(now, day=day, time=time)
+        return around(scheduling.requested_datetime(now, day=day, time=time))
     if part_of_day is not None:
-        start_hour = config.PART_OF_DAY_RANGES[part_of_day][0]
-        return scheduling.requested_datetime(now, day=day or "today", time=f"{start_hour:02d}:00")
+        start_hour, end_hour = config.APPOINTMENT_PART_OF_DAY[part_of_day]
+        first = scheduling.requested_datetime(now, day=day or "today", time=f"{start_hour:02d}:00").date()
+        return Preference(first, start_hour * 60, end_hour * 60, start_hour * 60)
     if day is not None:
-        return scheduling.requested_datetime(now, day=day, time="00:00")
-    return now
+        first = scheduling.requested_datetime(now, day=day, time="12:00").date()
+        return Preference(first, OPEN_MIN, CLOSE_MIN, OPEN_MIN)
+    return None
+
+
+def nearest_free_slot(conn: sqlite3.Connection, *, now: datetime, pref: Preference) -> datetime | None:
+    """The free slot closest to what the patient wants, on the first day that has
+    one inside their window. Ties go to the later slot."""
+    day, last = pref.first_day, (now + HORIZON).date()
+    while day <= last:
+        candidates = [s for s in _valid_slots(now, on_date=day) if pref.lo <= _minutes(s) < pref.hi]
+        free = _free(conn, candidates, now)
+        if free:
+            return min(free, key=lambda s: (abs(_minutes(s) - pref.target), -_minutes(s)))
+        day += timedelta(days=1)
+    return None
+
+
+def find_slot(conn: sqlite3.Connection, *, now: datetime, day: Day | None, time: str | None,
+              part_of_day: PartOfDay | None) -> tuple[datetime | None, datetime]:
+    """The slot to offer for a request, and the moment that was asked for."""
+    pref = preference(now, day=day, time=time, part_of_day=part_of_day)
+    if pref is None:
+        return earliest_free_slot(conn, now=now, not_before=now), now
+    return nearest_free_slot(conn, now=now, pref=pref), pref.anchor(now.tzinfo)
 
 
 def request_appointment(
@@ -132,11 +195,10 @@ def request_appointment(
 ) -> BookingOutcome:
     """Book the requested slot, or explain why not and offer alternatives."""
     if time is None:
-        # A day or part of day alone is not a choice of slot. Offer the earliest
-        # real one instead of booking on the patient's behalf.
-        start = search_start(now, day=day, time=None, part_of_day=part_of_day)
-        slot = earliest_free_slot(conn, now=now, not_before=start)
-        return BookingOutcome("needs_time", requested=start, alternatives=[slot] if slot else [])
+        # A day or part of day alone is not a choice of slot. Offer the nearest
+        # real one inside it instead of booking on the patient's behalf.
+        slot, asked = find_slot(conn, now=now, day=day, time=None, part_of_day=part_of_day)
+        return BookingOutcome("needs_time", requested=asked, alternatives=[slot] if slot else [])
 
     requested = scheduling.requested_datetime(now, day=day, time=time, part_of_day=part_of_day)
     requested_utc = scheduling.to_utc_iso(requested)
@@ -181,5 +243,7 @@ def request_appointment(
 
 
 def _next_after(conn: sqlite3.Connection, requested: datetime, now: datetime) -> list[datetime]:
-    slot = earliest_free_slot(conn, now=now, not_before=requested)
+    """The closest real option to a time that cannot be booked: the same day if
+    anything near it is free, otherwise the same time on the next open day."""
+    slot = nearest_free_slot(conn, now=now, pref=around(requested))
     return [slot] if slot else []

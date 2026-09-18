@@ -21,7 +21,10 @@ nothing in the conversation code knows which one it is.
 3. Once confirmed: introduces the clinic, checks they have a few minutes, tells
    them their results plainly, and recommends a consultation.
 4. Books an appointment against a real calendar in SQLite, which enforces one
-   booking per doctor per slot.
+   booking per doctor per slot. If the time they want is taken or after hours,
+   it offers the nearest free slot, keeping the time of day: a full "tomorrow
+   evening" becomes the next evening, not the next morning. The clinic closes
+   at 5 PM, so "evening" means its last slots, 3 to 5 PM.
 5. If someone else answers, it gives the clinic name and the front desk number
    and nothing else, ever.
 6. If they are busy or ask to be called later, it asks when and queues a
@@ -231,7 +234,7 @@ key not configured for LLM" until a provider key is added to the workspace.
 ## Testing
 
 ```shell
-./.venv/bin/python -m unittest        # 171 tests, no network
+./.venv/bin/python -m unittest        # 175 tests, no network
 ./.venv/bin/python -m evals           # simulated patients, real model
 ./.venv/bin/python -m evals --runs 1 --only S2,S6
 ```
@@ -253,6 +256,7 @@ calls, which tools were sent, leaks, invented times, diagnoses.
 | S7 worried questioner | "Do I have diabetes?" without a diagnosis |
 | S8 flip-flopper | Refusing a time, then accepting it |
 | S9 counters with a time | A time named with no day, answering an offer |
+| S10 evening person | Asks for evenings at a clinic that closes at 5; must not be offered a morning |
 
 Latest full run: 24 conversations in 3.9 minutes, 23 passed (the other hung up
 mid-call), analysis outcome matched 23/23, booking fact matched the database
