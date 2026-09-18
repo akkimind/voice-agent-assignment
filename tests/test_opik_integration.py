@@ -218,7 +218,8 @@ class Pluggability(unittest.TestCase):
     def test_the_agent_calls_opik_in_exactly_one_place(self):
         import re
         source = (self.ROOT / "agent.py").read_text()
-        self.assertEqual(len(re.findall(r"\bopik_integration\.\w+\(", source)), 1)
+        # Every use of the module, called directly or handed to a thread.
+        self.assertEqual(len(re.findall(r"\bopik_integration\.\w+", source)), 1)
 
     def test_no_core_module_imports_opik_itself(self):
         import re

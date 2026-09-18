@@ -1352,8 +1352,10 @@ async def _analyze_call(room: str, call: dict[str, Any]) -> None:
         path.write_text(json.dumps(analysis, indent=2, default=str))
         audio = ({"recorded": True, "file": recording.name, "format": "ogg",
                   "seconds": analysis["facts"].get("duration_seconds")} if recording else None)
-        opik_integration.send_call(record, analysis, audio=audio,
-                                   files=[transcript, path, call_log.path] + ([recording] if recording else []))
+        # In a thread: the Opik SDK's first import took 17 s and froze the
+        # agent's event loop when run here directly.
+        await asyncio.to_thread(opik_integration.send_call, record, analysis, audio=audio,
+                                files=[transcript, path, call_log.path] + ([recording] if recording else []))
         call_log.event("analysis_done", outcome=analysis["outcome"],
                        booking_successful=analysis["booking_successful"],
                        flags=analysis["flags"], error=analysis["error"], path=str(path))
@@ -1451,7 +1453,8 @@ async def entrypoint(ctx: JobContext) -> None:
         # starts before anyone joins the room; a bridged phone call has its
         # audio leg arriving. Console mode has no one to wait for.
         participant = await ctx.wait_for_participant()
-        call_log.event("participant_joined", identity=participant.identity, kind=str(participant.kind))
+        call_log.event("participant_joined", identity=participant.identity,
+                       participant_kind=str(participant.kind))
 
     session = _build_session(ctx.proc.userdata["vad"], patient)
     call["session"] = session

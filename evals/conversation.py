@@ -31,7 +31,7 @@ class ListLog(NullLog):
         super().__init__()
         self.rows: list[dict[str, Any]] = []
 
-    def event(self, kind: str, **fields: Any) -> float:
+    def event(self, kind: str, /, **fields: Any) -> float:
         self.rows.append({"event": kind, **fields})
         return self.elapsed_ms()
 

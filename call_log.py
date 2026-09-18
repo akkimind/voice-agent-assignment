@@ -38,7 +38,7 @@ class CallLog:
     def elapsed_ms(self) -> float:
         return round((time.monotonic() - self._start) * 1000, 1)
 
-    def event(self, kind: str, **fields: Any) -> float:
+    def event(self, kind: str, /, **fields: Any) -> float:
         """Record one event and return its t_ms, for computing durations."""
         t_ms = self.elapsed_ms()
         row = {"t_ms": t_ms, "at": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
@@ -59,7 +59,7 @@ class NullLog(CallLog):
     def __init__(self) -> None:  # noqa: D107 - deliberately opens no file
         self._start = time.monotonic()
 
-    def event(self, kind: str, **fields: Any) -> float:
+    def event(self, kind: str, /, **fields: Any) -> float:
         return self.elapsed_ms()
 
     def close(self) -> None:

@@ -161,3 +161,20 @@ class Analyze(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CallLogFields(unittest.TestCase):
+    def test_a_field_may_be_called_kind(self):
+        # A field named "kind" once collided with the event name and crashed a
+        # live call the moment the caller joined.
+        import tempfile, json
+        from pathlib import Path
+        from unittest import mock
+        import call_log
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(call_log, "LOG_DIR", Path(tmp)):
+            log = call_log.CallLog("room-1")
+            log.event("participant_joined", kind="standard", identity="patient")
+            log.close()
+            first = json.loads(log.path.read_text().splitlines()[0])
+        self.assertEqual(first["event"], "participant_joined")
+        self.assertEqual(first["kind"], "standard")

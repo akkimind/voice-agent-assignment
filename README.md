@@ -231,7 +231,7 @@ key not configured for LLM" until a provider key is added to the workspace.
 ## Testing
 
 ```shell
-./.venv/bin/python -m unittest        # 170 tests, no network
+./.venv/bin/python -m unittest        # 171 tests, no network
 ./.venv/bin/python -m evals           # simulated patients, real model
 ./.venv/bin/python -m evals --runs 1 --only S2,S6
 ```
