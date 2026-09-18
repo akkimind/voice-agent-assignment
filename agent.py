@@ -1243,6 +1243,15 @@ def _masked(phone: str) -> str:
     return f"******{digits[-4:]}" if len(digits) >= 4 else "******"
 
 
+def _in_console() -> bool:
+    """True under `agent.py console`, where the terminal is the other party."""
+    try:
+        from livekit.agents.cli.cli import AgentsConsole
+        return bool(AgentsConsole.get_instance().enabled)
+    except Exception:
+        return False
+
+
 def _job_metadata(ctx: JobContext) -> dict[str, Any]:
     try:
         return json.loads((ctx.job.metadata or "").strip() or "{}")
@@ -1437,8 +1446,10 @@ async def entrypoint(ctx: JobContext) -> None:
             await _analyze_call(ctx.room.name, call)
             return
 
-    if transport == "sip_inbound":
-        # The phone leg is already up; wait for its audio before speaking.
+    if transport == "sip_inbound" or (transport == "webrtc" and not _in_console()):
+        # Someone has to be there to hear the opening. A dispatched browser call
+        # starts before anyone joins the room; a bridged phone call has its
+        # audio leg arriving. Console mode has no one to wait for.
         participant = await ctx.wait_for_participant()
         call_log.event("participant_joined", identity=participant.identity, kind=str(participant.kind))
 

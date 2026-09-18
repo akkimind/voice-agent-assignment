@@ -64,6 +64,18 @@ async def dispatch(patient_id: str | None, phone: str | None, browser: bool,
     finally:
         await lk.aclose()
 
+    if browser:
+        # A join link scoped to this one room, valid for an hour.
+        from datetime import timedelta
+        from urllib.parse import urlencode
+        token = (api.AccessToken().with_identity("patient").with_name("Patient")
+                 .with_grants(api.VideoGrants(room_join=True, room=room))
+                 .with_ttl(timedelta(hours=1)).to_jwt())
+        link = "https://meet.livekit.io/custom?" + urlencode(
+            {"liveKitUrl": os.environ["LIVEKIT_URL"], "token": token})
+        print("join in your browser (allow the microphone):")
+        print(link)
+
     where = ("the browser" if browser else
              f"a simulated SIP {simulate_status} refusal" if simulate_status else
              f"phone ending {str(metadata['phone'])[-4:]}")
