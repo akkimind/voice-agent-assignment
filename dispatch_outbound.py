@@ -42,7 +42,9 @@ async def dispatch(patient_id: str | None, phone: str | None, browser: bool,
     metadata = {"patient_id": patient["id"]}
     if not browser:
         metadata["transport"] = "sip"
-        metadata["phone"] = phone or patient["phone"]
+        # The seed records carry fictional numbers; a real one for demos comes
+        # from .env so it never lands in the repository.
+        metadata["phone"] = phone or os.environ.get("DEMO_DIAL_TO") or patient["phone"]
         if not metadata["phone"]:
             print(f"{patient['name']} has no phone number on file", file=sys.stderr)
             return 2

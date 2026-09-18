@@ -1,8 +1,8 @@
 {
-  "sip_trunk_id": "REPLACE_WITH_TRUNK_ID_FROM_LK_OUTPUT",
-  "sip_call_to": "+15555550101",
-  "room_name": "spike-room",
-  "participant_identity": "sip-test",
-  "participant_name": "Phase 1 spike",
-  "wait_until_answered": true
+ "sip_trunk_id": "REPLACE_WITH_TRUNK_ID_FROM_LK_OUTPUT",
+ "sip_call_to": "+15555550101",
+ "room_name": "spike-room",
+ "participant_identity": "sip-test",
+ "participant_name": "Phase 1 spike",
+ "wait_until_answered": true
 }
