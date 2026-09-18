@@ -20,6 +20,8 @@ character for the whole call.
 
 {brief}
 
+How you talk: {style}. Say things your own way; never copy the caller's phrasing.
+
 It is now {now} where you live. Any day or time you suggest must make sense for that.
 
 Rules:
@@ -32,22 +34,35 @@ Rules:
 """
 
 
-def build_llm() -> llm.LLM:
+# One is picked at random per conversation, so no two runs word things alike.
+STYLES = [
+    "terse, a few words at a time",
+    "chatty, with a little small talk",
+    "polite and indirect",
+    "plain, simple English; English is your second language",
+    "casual, with filler words like 'uh' and 'yeah'",
+    "distracted, sometimes answering a moment late",
+]
+
+
+def build_llm(model: str = "") -> llm.LLM:
+    model = model or SIM_MODEL
     return llm.FallbackAdapter([
-        openai.LLM(model=SIM_MODEL, base_url=config.GROQ_BASE_URL, api_key=os.environ["GROQ_API_KEY"],
+        openai.LLM(model=model, base_url=config.GROQ_BASE_URL, api_key=os.environ["GROQ_API_KEY"],
                    reasoning_effort="low"),
         inference.LLM(model=SIM_FALLBACK_MODEL, extra_kwargs={"reasoning_effort": "low"}),
     ], max_retry_per_llm=0)
 
 
 class SimulatedPerson:
-    def __init__(self, brief: str, model: llm.LLM) -> None:
+    def __init__(self, brief: str, model: llm.LLM, style: str = "") -> None:
         self._model = model
         # Roles are flipped: the agent's lines are what this model hears.
         self._ctx = llm.ChatContext()
         import booking
         now = booking.clinic_now().strftime("%A %d %B, %I:%M %p")
-        self._ctx.add_message(role="system", content=_RULES.format(brief=brief, hangup=HANGUP, now=now))
+        self._ctx.add_message(role="system", content=_RULES.format(brief=brief, hangup=HANGUP, now=now,
+                                                                         style=style or "naturally"))
         self.tokens = [0, 0]
 
     async def reply(self, agent_said: str) -> str | None:

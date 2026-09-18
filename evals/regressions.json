@@ -1,0 +1,36 @@
+[
+ {
+  "id": "no-then-evening",
+  "patient_id": "p-001",
+  "expect": "evening",
+  "note": "\"No.\" to \"any preference?\" was not taken as no preference, then \"one evening slot\" was not recognised",
+  "source": "call-p-001-22bb3a_20260918_152235.jsonl",
+  "lines": [
+   "Yes.",
+   "Yes. What is this about?",
+   "Yes.",
+   "No.",
+   "I don't have any preference. Just give me one evening slot.",
+   "Can you make it four?",
+   "Okay.",
+   "Keep that."
+  ]
+ },
+ {
+  "id": "evenings-then-6pm",
+  "patient_id": "p-001",
+  "expect": "evening",
+  "note": "\"evenings\" was offered a morning; \"tomorrow six PM\" is after hours",
+  "source": "call-p-001-505c59_20260918_142834.jsonl",
+  "lines": [
+   "Yes. Speaking.",
+   "Yes. What is this about?",
+   "Sure.",
+   "No. But I would prefer evenings slot.",
+   "An evening slot.",
+   "Tomorrow, six PM?",
+   "Okay.",
+   "No. Thank you."
+  ]
+ }
+]

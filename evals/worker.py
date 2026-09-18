@@ -23,25 +23,25 @@ def init(db_dir: str) -> None:
     load_dotenv(ROOT / ".env")
 
 
-def cases() -> dict[str, Any]:
-    from evals import personas
-    return {c.id: c for c in personas.PERSONAS}
-
-
-def patient_ids() -> list[str]:
-    import config
-    return [p["id"] for p in config.load_seed_patients()]
-
-
-def run_job(case_id: str, run_no: int, patient_id: str) -> dict[str, Any]:
+def run_job(suite: str, key: str, phrase: str, run_no: int, patient_id: str) -> dict[str, Any]:
     """One conversation. A crash (both providers refusing under parallel load)
     is retried once and noted, so load does not read as an agent failure."""
     import asyncio
-    from evals import conversation
-    case = cases()[case_id]
+
+    import config
+    from evals import conversation, suites
+    case = suites.build(suite, key, phrase)
+    ids = {p["id"] for p in config.load_seed_patients()}
+    # A live call from before the fictional patients keeps its lines, not its patient.
+    patient_id = patient_id if patient_id in ids else sorted(ids)[0]
     result = conversation.as_dict(asyncio.run(conversation.run(case, run_no, patient_id)))
     if result["status"] == "crash":
         first = result["errors"][:1]
         result = conversation.as_dict(asyncio.run(conversation.run(case, run_no, patient_id)))
         result["errors"].append(f"retried after crash: {first}")
     return result
+
+
+def patient_ids() -> list[str]:
+    import config
+    return [p["id"] for p in config.load_seed_patients()]

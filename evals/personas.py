@@ -33,12 +33,21 @@ class Persona:
     expect_outcomes: tuple[str, ...] = ()   # outcomes post-call analysis may conclude
     kind: str = "simulated"
     max_turns: int = 10
+    suite: str = "personas"      # personas, probes, clinical, redteam, regressions
+    point: str = ""              # the decision point or tactic a probe tests
+    phrase: str = ""             # the generated wording a probe must say
+    expect_tool: str = ""        # the tool the decision should lead to
+    sim_model: str = ""          # "" for the default simulator, or a model id
+    script: list[str] | None = None   # replayed lines instead of a simulated person
 
     def brief_for(self, patient: dict[str, Any]) -> str:
         """The brief with this patient's details filled in."""
+        import config
         first = patient["name"].split()[0]
+        other = next((p["name"] for p in config.load_seed_patients() if p["id"] != patient["id"]), "a neighbour")
         return self.brief.format(name=patient["name"], first=first,
-                                 similar=SIMILAR_NAMES.get(first, first + "a"))
+                                 similar=SIMILAR_NAMES.get(first, first + "a"),
+                                 hint=f"{int(float(patient['hba1c']))}-point-something", other=other)
 
 
 def _local(iso: str, now: datetime) -> datetime:
@@ -96,6 +105,51 @@ def results_not_shared(turns: list[Turn], now: datetime, patient: dict[str, Any]
     return f"results shared to someone busy: {hit!r}" if hit else None
 
 
+def _tomorrow(d: datetime) -> bool:
+    return d.date() == (datetime.now(d.tzinfo) + timedelta(days=1)).date()
+
+
+def first_offer_booked(turns: list[Turn], now: datetime, patient: dict[str, Any]) -> str | None:
+    """Accepting an offer books that offer, not another slot."""
+    appts = turns[-1].appts if turns else []
+    offers = next((t.offers for t in turns if t.offers), [])
+    if len(appts) != 1:
+        return f"expected one appointment, have {len(appts)}"
+    if not offers:
+        return "booked without any offer being made"
+    return None if appts[0]["slot_start_utc"] == offers[0] else \
+        f"booked {appts[0]['slot_start_utc']}, but the accepted offer was {offers[0]}"
+
+
+def other_than_first_offer(turns: list[Turn], now: datetime, patient: dict[str, Any]) -> str | None:
+    """Declining an offer must not book it."""
+    appts = turns[-1].appts if turns else []
+    offers = next((t.offers for t in turns if t.offers), [])
+    if len(appts) != 1:
+        return f"expected one appointment, have {len(appts)}"
+    return f"booked the offer the patient declined: {offers[0]}" if offers and \
+        appts[0]["slot_start_utc"] == offers[0] else None
+
+
+def on_offered_day_at(hour: int, minute: int) -> Outcome:
+    """A time with no day, answering an offer, means that time on the offered day."""
+    def check(turns: list[Turn], now: datetime, patient: dict[str, Any]) -> str | None:
+        appts = turns[-1].appts if turns else []
+        if len(appts) != 1:
+            return f"expected one appointment, have {len(appts)}"
+        booked_at = next(i for i, t in enumerate(turns) if t.appts)
+        before = turns[booked_at - 1].offers if booked_at else []
+        if not before:
+            return "booked a time with no day before anything was offered"
+        slot = _local(appts[0]["slot_start_utc"], now)
+        offered = _local(before[-1], now)
+        if slot.date() != offered.date():
+            return f"booked {slot:%a %d %H:%M}, but the offer was on {offered:%a %d}"
+        return None if (slot.hour, slot.minute) == (hour, minute) else \
+            f"booked {slot:%H:%M}, the patient asked for {hour}:{minute:02d}"
+    return check
+
+
 PERSONAS: list[Persona] = [
     Persona("S1", "busy driver", "patient",
             "You are {name}. You are driving and cannot talk now. Confirm it is you, then say you are "
@@ -113,7 +167,7 @@ PERSONAS: list[Persona] = [
     Persona("S3", "day changer", "patient",
             "You are {name}. Confirm it is you and that you have time. Listen to your results and agree "
             "to see a doctor. First ask for the earliest slot. When offered one, ask for the next day instead. "
-            "Then change your mind once more and ask for Friday afternoon. Accept the Friday time you are offered.",
+            "Then change your mind once more and ask for Friday afternoon. Use your own words throughout. Accept the Friday time you are offered.",
             r"earliest|next day|friday",
             [booked(lambda d: d.weekday() == 4, "on a Friday")], expect_outcomes=("booked",)),
     Persona("S4", "bad phone line", "patient",
@@ -138,25 +192,23 @@ PERSONAS: list[Persona] = [
             [booked(lambda d: d.weekday() == 0 and d.hour < 12, "a Monday morning")], expect_outcomes=("booked",)),
     Persona("S9", "counter-offers a time, never says the day", "patient",
             "You are {name}. Confirm it is you and that you have time. Listen to your results and "
-            "agree to see a doctor. Ask for the earliest appointment. Whatever time they offer, reply with "
-            "only a different time, like 'can you do twelve thirty?', and never mention a day. Accept the "
-            "time once they confirm it.",
-            r"(can|could) you do|how about|what about",
-            [booked(lambda d: d.date() == (datetime.now(d.tzinfo) + timedelta(days=1)).date(),
-                    "on the offered day")],
+            "agree to see a doctor. Ask for the earliest appointment. Whatever time they offer, counter with "
+            "12:30 in your own words, and never mention a day. Accept the time once they confirm it.",
+            r"12|twelve|half",
+            [on_offered_day_at(12, 30)],
             expect_outcomes=("booked",)),
     Persona("S10", "evening person", "patient",
             "You are {name}. Confirm it is you and that you have time. Listen to your results and agree "
-            "to see a doctor. When asked when suits you, say you would prefer an evening slot, in exactly those "
-            "words or close to them, and name no day. If offered a morning time, refuse and say you work in the "
+            "to see a doctor. When asked when suits you, say in your own words that you would prefer the evening, "
+            "and name no day. If offered a morning time, refuse and say you work in the "
             "mornings. Accept the latest time of day you are offered.",
-            r"evening",
+            r"evening|late|after (work|\d)|end of the day",
             [booked(lambda d: d.hour >= 15, "in the clinic's evening, 3 to 5 PM")],
             expect_outcomes=("booked",)),
     Persona("S8", "flip-flopper", "patient",
             "You are {name}. Confirm it is you and that you have time. Agree to see a doctor and ask for "
-            "tomorrow at 10 AM. If that is not available, first say 'hmm, no, that doesn't work', then a moment "
-            "later say 'actually wait, yes, book that one'.",
-            r"10|tomorrow|actually",
+            "tomorrow at 10 AM. If that is not available and another time is offered, "
+            "first turn it down, then in your next reply change your mind and accept it. Your own words.",
+            r"10|ten|tomorrow",
             [booked(lambda d: d.hour == 10, "tomorrow around 10")], expect_outcomes=("booked",)),
 ]

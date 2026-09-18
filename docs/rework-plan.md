@@ -1,6 +1,6 @@
 # Rework plan: meaning over keywords, measured
 
-Status: **approved.** W1–W3 done (baseline: docs/scorecard-baseline.md); W4 next.
+Status: **approved.** W1–W4 done (baseline: docs/scorecard-baseline.md, new tests on today's code: docs/scorecard-w4-checkpoint.md); W5 next.
 
 ## Why
 

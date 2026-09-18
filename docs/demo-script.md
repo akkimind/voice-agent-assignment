@@ -10,7 +10,7 @@ the demo shows the flow once, cleanly, then shows the reasoning behind it.
 
 ```shell
 ./.venv/bin/python db.py --reset                 # clean calendar, seed slots
-./.venv/bin/python -m unittest                   # expect OK, 203 tests
+./.venv/bin/python -m unittest                   # expect OK, 226 tests
 ./.venv/bin/python opik_rules.py show | head -20 # the rule exists, filters on
 ```
 
