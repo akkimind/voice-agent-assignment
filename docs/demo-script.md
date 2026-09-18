@@ -10,13 +10,13 @@ the demo shows the flow once, cleanly, then shows the reasoning behind it.
 
 ```shell
 ./.venv/bin/python db.py --reset                 # clean calendar, seed slots
-./.venv/bin/python -m unittest                   # expect OK, 166 tests
+./.venv/bin/python -m unittest                   # expect OK, 170 tests
 ./.venv/bin/python opik_rules.py show | head -20 # the rule exists, filters on
 ```
 
 Open, in this order, so switching is quick:
 
-1. **Terminal A** — for the agent (you'll run `agent.py console` in it).
+1. **Terminal A** — for the agent (you'll run `agent.py console --record` in it).
 2. **Terminal B** — in the project folder, for commands during the demo.
 3. **Opik**, project `adit-outbound-voice-agent`, Traces tab.
 4. **Your editor** with `agent.py`, `post_call.py`, `opik_integration.py` open.
@@ -46,7 +46,7 @@ Show the architecture diagram in the README while you say it.
 Terminal A:
 
 ```shell
-./.venv/bin/python agent.py console
+./.venv/bin/python agent.py console --record
 ```
 
 Play the patient. These lines exercise the interesting parts:
@@ -107,7 +107,8 @@ Show, in order:
 2. **Output** — outcome, booking, summary
 3. **Spans** — one per turn, one per tool call with arguments and result, one
    per model request with token counts, and the post-call analysis
-4. **Metadata** — models, duration, tokens, which guards fired, the audio reference
+4. **Metadata and attachments** — models, duration, tokens, which guards fired,
+   and the call recording: play a few seconds of the attached `.ogg`
 5. **Feedback scores** — two kinds side by side:
    - from the database: `booking_successful`, `results_leaked_to_non_patient`, `guards_fired`
    - from Opik's own judge: `booking_achieved`, `privacy_respected`, `professionalism`, each with a reason
@@ -128,7 +129,7 @@ Online evaluation tab to show the rule, then come back.
 Terminal A, a second call:
 
 ```shell
-./.venv/bin/python agent.py console
+./.venv/bin/python agent.py console --record
 ```
 
 | You say | What it shows |

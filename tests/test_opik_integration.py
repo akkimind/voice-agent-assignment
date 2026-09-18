@@ -1,6 +1,7 @@
 """What we send to Opik, checked without touching the network."""
 
 import unittest
+from pathlib import Path
 from datetime import datetime, timezone
 
 import opik_integration as oi
@@ -123,6 +124,21 @@ class Payload(unittest.TestCase):
         audio = self.payload["metadata"]["audio"]
         self.assertFalse(audio["recorded"])
         self.assertEqual(audio["livekit_room"], "call-room")
+
+    def test_a_recorded_call_says_so_and_names_the_file(self):
+        audio = {"recorded": True, "file": "call-room_20260918.ogg", "format": "ogg"}
+        reference = oi.build_payload(a_call(), ANALYSIS, audio=audio)["metadata"]["audio"]
+        self.assertTrue(reference["recorded"])
+        self.assertEqual(reference["file"], "call-room_20260918.ogg")
+        self.assertIn("attached", reference["note"])
+
+    def test_the_recording_is_attached_as_audio(self):
+        import tempfile
+        from unittest import mock
+        with tempfile.NamedTemporaryFile(suffix=".ogg") as f, \
+                mock.patch("opik.Attachment", side_effect=lambda **kw: kw):
+            attachments = oi._attachments([Path(f.name)])
+        self.assertEqual(attachments[0]["content_type"], "audio/ogg")
 
     def test_leak_flag_becomes_a_score(self):
         leaked = {**ANALYSIS, "flags": ["results_disclosed_to_non_patient"]}

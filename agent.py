@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import re
+import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated, Any, AsyncIterable, Literal
@@ -1303,10 +1304,32 @@ def _hang_up_when_finished(ctx: JobContext, session: AgentSession, log: CallLog)
 _CALLS: dict[str, dict[str, Any]] = {}
 
 
+def _save_recording(room: str, call: dict[str, Any]) -> Path | None:
+    """Keep the call's audio. The recorder writes into a temporary session folder
+    that is deleted at shutdown, so it is copied out while it still exists."""
+    ctx, session = call.get("ctx"), call.get("session")
+    if not (config.RECORD_CALLS and ctx and session):
+        return None
+    try:
+        source = ctx.make_session_report(session).audio_recording_path
+    except Exception:
+        logger.exception("could not read the session recording")
+        return None
+    if not source or not Path(source).exists() or Path(source).stat().st_size == 0:
+        return None
+    config.RECORDINGS_DIR.mkdir(exist_ok=True)
+    target = config.RECORDINGS_DIR / f"{room}_{datetime.now(timezone.utc):%Y%m%d_%H%M%S}.ogg"
+    shutil.copyfile(source, target)
+    return target
+
+
 async def _analyze_call(room: str, call: dict[str, Any]) -> None:
     """Save the transcript and the post-call analysis next to it. Never raises."""
     agent, session, call_log = call["agent"], call["session"], call["log"]
     transcript = _save_transcript_for(room, agent, session)
+    recording = _save_recording(room, call)
+    if recording:
+        call_log.event("recording_saved", path=str(recording), bytes=recording.stat().st_size)
     try:
         rows = [json.loads(line) for line in call_log.path.read_text().splitlines() if line.strip()]
         history = session.history.to_dict()["items"] if session else []
@@ -1318,7 +1341,10 @@ async def _analyze_call(room: str, call: dict[str, Any]) -> None:
         TRANSCRIPT_DIR.mkdir(exist_ok=True)
         path = TRANSCRIPT_DIR / f"{room}_{datetime.now(timezone.utc):%Y%m%d_%H%M%S}_analysis.json"
         path.write_text(json.dumps(analysis, indent=2, default=str))
-        opik_integration.send_call(record, analysis, files=[transcript, path, call_log.path])
+        audio = ({"recorded": True, "file": recording.name, "format": "ogg",
+                  "seconds": analysis["facts"].get("duration_seconds")} if recording else None)
+        opik_integration.send_call(record, analysis, audio=audio,
+                                   files=[transcript, path, call_log.path] + ([recording] if recording else []))
         call_log.event("analysis_done", outcome=analysis["outcome"],
                        booking_successful=analysis["booking_successful"],
                        flags=analysis["flags"], error=analysis["error"], path=str(path))
@@ -1374,7 +1400,8 @@ async def entrypoint(ctx: JobContext) -> None:
     call_log = CallLog(ctx.room.name)
     call_log.event("call_start", room=ctx.room.name, patient_id=patient["id"], transport=transport)
     agent = HealthcareAgent(patient, room_name=ctx.room.name, call_log=call_log)
-    call: dict[str, Any] = {"agent": agent, "session": None, "log": call_log, "transport": transport}
+    call: dict[str, Any] = {"agent": agent, "session": None, "log": call_log, "transport": transport,
+                            "ctx": ctx}
     _CALLS[ctx.room.name] = call
 
     async def _on_shutdown() -> None:
@@ -1420,8 +1447,11 @@ async def entrypoint(ctx: JobContext) -> None:
     _log_session_events(session, call_log)
     if on_phone:
         _hang_up_when_finished(ctx, session, call_log)
-    await session.start(room=ctx.room, agent=agent)
-    call_log.event("session_started")
+    # Audio only: transcripts and traces already go to our own log and to Opik.
+    await session.start(room=ctx.room, agent=agent,
+                        record={"audio": config.RECORD_CALLS, "traces": False,
+                                "logs": False, "transcript": False})
+    call_log.event("session_started", recording=config.RECORD_CALLS)
 
     # On a phone call the callee says "hello" first, so the agent waits briefly.
     # Over WebRTC nobody does, and waiting only delays the opening.

@@ -229,5 +229,16 @@ class SimulatedRefusals(unittest.TestCase):
         self.assertTrue(payload["metadata"]["simulated"])
 
 
+class Recording(unittest.TestCase):
+    def test_nothing_to_save_without_a_session(self):
+        import agent
+        self.assertIsNone(agent._save_recording("call-1", {"ctx": None, "session": None}))
+
+    def test_a_missing_file_is_not_an_error(self):
+        import agent
+        ctx = SimpleNamespace(make_session_report=lambda _s: SimpleNamespace(audio_recording_path="/no/such.ogg"))
+        self.assertIsNone(agent._save_recording("call-1", {"ctx": ctx, "session": object()}))
+
+
 if __name__ == "__main__":
     unittest.main()

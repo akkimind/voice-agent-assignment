@@ -138,7 +138,7 @@ Without the Opik keys everything still works; calls simply are not sent.
 ## Running
 
 ```shell
-./.venv/bin/python agent.py console          # talk to it in the terminal
+./.venv/bin/python agent.py console --record # talk to it in the terminal, recorded
 ./.venv/bin/python agent.py dev              # worker; join the room in a browser
 ./.venv/bin/python dispatch_outbound.py      # ring a real phone (needs SIP setup)
 ```
@@ -191,7 +191,9 @@ Each trace carries:
 - **Tool calls:** arguments and results, as spans
 - **Model requests:** with token usage, so Opik prices the call
 - **Analysis:** the judgement plus the corrections code applied
-- **Audio reference:** the LiveKit room and server. Calls are not recorded yet
+- **Call recording:** both sides of the call as an Ogg file attached to the
+  trace, plus the LiveKit room as a reference. Console mode records only with
+  `--record`
 - **Scores from the database:** `booking_successful`,
   `results_leaked_to_non_patient`, `guards_fired`
 
@@ -229,7 +231,7 @@ key not configured for LLM" until a provider key is added to the workspace.
 ## Testing
 
 ```shell
-./.venv/bin/python -m unittest        # 166 tests, no network
+./.venv/bin/python -m unittest        # 170 tests, no network
 ./.venv/bin/python -m evals           # simulated patients, real model
 ./.venv/bin/python -m evals --runs 1 --only S2,S6
 ```
@@ -336,12 +338,17 @@ for a real one.
 | Opik trace | Working, verified on the server |
 | Opik online rule | Working: a replayed call was scored automatically |
 | Phone calls | Code complete and unit-tested; blocked on the SIP account, see above |
-| Call recording | Not implemented; the Opik audio field is a reference |
+| Call recording | Each call's audio is saved to `recordings/` and attached to its Opik trace |
 | Callback dialer | Callbacks are queued, but nothing dials them yet |
 | `no_answer`, `rejected` | Mapped from SIP status; reachable on a real line, or with `--simulate-status` |
 | `voicemail` | Defined only; needs carrier answering-machine detection |
 
 ### Known rough edges
+
+- Calls are recorded, and LiveKit also keeps a copy on its Cloud dashboard.
+  A real clinic must tell the patient the call is recorded before sharing
+  anything medical; the agent does not say so yet. `RECORD_CALLS` in
+  `config.py` turns recording off.
 
 - Speech recognition mangles names on poor audio. The confirmation step handles
   it, at the cost of one extra turn.

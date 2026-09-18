@@ -240,5 +240,13 @@ callback_requested, declined, incomplete. So someone else asking for a callback 
 wrong_person.
 """
 
+# --- Call recording ---------------------------------------------------------
+# Record each call's audio (both sides, one Ogg file) so the Opik trace carries
+# an actual recording, not only a reference. LiveKit also uploads a recorded
+# session to its Cloud dashboard. A real deployment must tell the patient the
+# call is recorded before any medical detail is shared.
+RECORD_CALLS = True
+RECORDINGS_DIR = Path(__file__).parent / "recordings"
+
 # --- Opik ------------------------------------------------------------------
 OPIK_PROJECT_NAME = "adit-outbound-voice-agent"

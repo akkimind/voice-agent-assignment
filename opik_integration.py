@@ -12,8 +12,8 @@ One trace carries:
 - every tool call, with its arguments and result
 - every model request, with token usage, so Opik can price the call
 - the post-call analysis, with the corrections code applied to it
-- an audio reference: the LiveKit room and session, since calls are not
-  recorded yet
+- the call recording as an attached Ogg file, plus the LiveKit room as a
+  reference
 - feedback scores taken from the database, never from a model
 
 Nothing here may disturb a call: every failure is caught and logged.
@@ -158,9 +158,13 @@ def scores(analysis: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def audio_reference(call: CallRecord, audio: dict[str, Any] | None) -> dict[str, Any]:
-    """Calls are not recorded yet, so this points at the call in LiveKit."""
+    """Where the call's audio is. When the call was recorded, the Ogg file is
+    attached to the trace; the LiveKit room identifies the session either way."""
     reference = {"recorded": False, "livekit_room": call.room,
-                 "livekit_url": os.environ.get("LIVEKIT_URL", ""), "note": "session reference; no audio file yet"}
+                 "livekit_url": os.environ.get("LIVEKIT_URL", ""),
+                 "note": "no recording for this call; the LiveKit room identifies the session"}
+    if audio and audio.get("recorded"):
+        reference["note"] = "recording attached to this trace"
     return {**reference, **(audio or {})}
 
 
@@ -206,7 +210,7 @@ def build_payload(call: CallRecord, analysis: dict[str, Any], audio: dict[str, A
 
 def _attachments(files: list[Path]) -> list[Any]:
     import opik
-    types = {".json": "application/json", ".jsonl": "application/x-ndjson"}
+    types = {".json": "application/json", ".jsonl": "application/x-ndjson", ".ogg": "audio/ogg"}
     return [opik.Attachment(data=str(path), file_name=Path(path).name,
                             content_type=types.get(Path(path).suffix, "text/plain"))
             for path in files]
