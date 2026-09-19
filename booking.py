@@ -26,7 +26,7 @@ from zoneinfo import ZoneInfo
 import config
 import db
 import scheduling
-from scheduling import Day, PartOfDay, SchedulingError
+from scheduling import Day, PartOfDay
 
 Status = Literal["booked", "unavailable", "needs_time", "has_existing"]
 

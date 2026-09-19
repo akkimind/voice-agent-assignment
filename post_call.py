@@ -34,6 +34,8 @@ import db
 ANALYSIS_VERSION = 1
 SIP_ONLY_OUTCOMES = ("no_answer", "voicemail", "rejected")
 
+# Every call gets exactly one. "incomplete" is a call that ended before any
+# decision; the last three are only reachable over a real phone line.
 Outcome = Literal["booked", "declined", "callback_requested", "wrong_person",
                   "no_answer", "voicemail", "rejected", "incomplete"]
 

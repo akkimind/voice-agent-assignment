@@ -6,7 +6,6 @@ so conversations in parallel never see each other's bookings.
 
 from __future__ import annotations
 
-import asyncio
 import os
 import random
 import re
@@ -97,7 +96,7 @@ async def _agent_turn(session: AgentSession, log: ListLog, patient_id: str, say:
         elif row["event"] == "llm_response":
             result.agent_tokens[0] += row.get("prompt_tokens") or 0
             result.agent_tokens[1] += row.get("completion_tokens") or 0
-        elif row["event"].startswith("guard_") or row["event"] == "booked_from_search":
+        elif row["event"].startswith("guard_"):
             detail = row.get("sentence") or row.get("removed") or row.get("unsaid") or ""
             turn.guards.append(f"{row['event']} {detail!r}" if detail else row["event"])
     turn.appts, turn.cbs = _db_state(patient_id)

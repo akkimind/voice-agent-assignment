@@ -27,7 +27,7 @@ LOG_ROWS = [
     {"event": "tool_result", "at": at(11), "seq": 1, "tool": "book_appointment",
      "result": "Booked for tomorrow at 10:30 AM. Reference ADT-1.", "duration_ms": 12.5},
     {"event": "tts_done", "at": at(12), "text": "Booked, reference ADT-1."},
-    {"event": "guard_ungrounded_time", "at": at(12), "sentence": "around 9 AM"},
+    {"event": "guard_blocked_time", "at": at(12), "sentence": "around 9 AM"},
 ]
 
 ANALYSIS = {
@@ -35,7 +35,7 @@ ANALYSIS = {
     "facts": {"booking": {"booked": True, "reference": "ADT-1", "slot_local": "2026-09-17T10:30+05:30"},
               "callback": {"queued": False}, "results_disclosed": True, "duration_seconds": 12.0,
               "agent_tokens": {"input": 1200, "output": 30}, "tool_errors": [],
-              "guards": ["guard_ungrounded_time"]},
+              "guards": ["guard_blocked_time"]},
     "judgement": {"outcome": "booked", "answered_by": "patient", "sentiment": "positive",
                   "concerns": [], "summary": "Booked for tomorrow."},
     "overridden": [], "flags": [], "analysis_tokens": {"input": 900, "output": 120}, "error": None,
@@ -93,6 +93,15 @@ class Payload(unittest.TestCase):
         text = oi.build_payload(call, ANALYSIS)["input"]["transcript"]
         self.assertIn("AGENT: Hi Arjun.", text)
         self.assertIn("CALLEE: Tomorrow at ten thirty.", text)
+
+    def test_the_generated_opening_is_on_the_trace(self):
+        call = CallRecord(room="call-room", patient=PATIENT, log_rows=LOG_ROWS, history=[
+            {"type": "message", "role": "assistant", "content": ["Hi, is this Arjun?"]},
+            {"type": "message", "role": "user", "content": ["Yes."]},
+            {"type": "message", "role": "assistant", "content": ["Great."]},
+        ])
+        self.assertEqual(oi.build_payload(call, ANALYSIS)["input"]["opening"], "Hi, is this Arjun?")
+        self.assertEqual(oi.build_payload(a_call(), ANALYSIS)["input"]["opening"], "")
 
     def test_outcome_and_booking_are_the_trace_output(self):
         self.assertEqual(self.payload["output"]["outcome"], "booked")

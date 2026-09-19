@@ -259,13 +259,6 @@ def insert_appointment(conn: sqlite3.Connection, record: dict[str, Any]) -> None
     )
 
 
-def cancel_appointment(conn: sqlite3.Connection, reference: str) -> None:
-    conn.execute(
-        "UPDATE appointments SET status = 'cancelled', cancelled_utc = ? WHERE reference = ?",
-        (scheduling.to_utc_iso(utc_now()), reference),
-    )
-
-
 # --- Callbacks -----------------------------------------------------------------
 
 def supersede_pending_callbacks(conn: sqlite3.Connection, patient_id: str, new_reference: str) -> None:

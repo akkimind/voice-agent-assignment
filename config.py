@@ -90,20 +90,6 @@ APPOINTMENT_PART_OF_DAY = {"morning": (9, 12), "afternoon": (12, 15), "evening":
 APPOINTMENT_AROUND_MINUTES = 60
 
 
-# --- Call outcomes ---------------------------------------------------------
-# The post-call analyzer must classify every call into exactly one of these.
-# The last three are only reachable over real telephony, never over WebRTC.
-CALL_OUTCOMES = (
-    "booked",
-    "declined",
-    "callback_requested",
-    "wrong_person",
-    "incomplete",      # the call ended before any decision, e.g. a hang-up mid-call
-    "no_answer",
-    "voicemail",
-    "rejected",
-)
-
 # --- Callbacks -------------------------------------------------------------
 # All times are in the patient's local timezone. A callback is scheduled for
 # when the caller asked, then only ever moved LATER to satisfy these rules. An
