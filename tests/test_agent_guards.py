@@ -92,8 +92,13 @@ class Gate(unittest.TestCase):
         self.assertEqual(g.reason, "clinic")
 
     def test_a_stage_direction_is_not_speech(self):
-        self.assertEqual(gate(["(end call)"])[1].reason, "stage")
+        self.assertEqual(gate(["(pauses)"])[1].reason, "stage")
+        self.assertEqual(gate(["(end call)"])[0], "")   # a tool name alone: removed, nothing said
         self.assertEqual(gate(["Thanks (and take care)."])[0], "Thanks (and take care).")
+
+    def test_a_tool_name_in_brackets_is_not_said(self):
+        self.assertEqual(gate(["Thank you, Sam. Goodbye.(end_call)"])[0], "Thank you, Sam. Goodbye.")
+        self.assertEqual(gate(["All set [book_appointment], see you then."])[0], "All set, see you then.")
 
     def test_plain_text_passes(self):
         text = "The doctor would like to go over these with you. Would you like to book?"
@@ -190,6 +195,43 @@ class Identity(unittest.TestCase):
         a._last_chat_ctx = chat(("assistant", "May I speak with Arjun?"), ("user", "Arjun speaking."))
         verify(a, said("Yes. Hi."), True)   # the history lags one line behind
         self.assertEqual(heard[-1], "PERSON: Arjun speaking.")
+
+    def test_the_check_starts_when_the_caller_stops_speaking(self):
+        """verify_identity awaits the check already running, instead of a new one."""
+        calls = []
+
+        def checker(name, lines):
+            calls.append(lines[-1])
+            return True
+
+        a = an_agent(checker=checker)
+
+        async def run():
+            turn = chat(("assistant", "May I speak with Arjun?"))
+            message = llm.ChatMessage(role="user", content=["Arjun speaking."])
+            await a.on_user_turn_completed(turn, message)
+            a._last_chat_ctx = chat(("assistant", "May I speak with Arjun?"), ("user", "Arjun speaking."))
+            return await a._verify(said("Arjun speaking."), True)
+
+        self.assertIn("7.4%", asyncio.run(run()))
+        self.assertEqual(calls, ["PERSON: Arjun speaking."])   # once, not twice
+
+    def test_an_early_check_on_an_older_line_is_not_reused(self):
+        calls = []
+
+        def checker(name, lines):
+            calls.append(lines[-1])
+            return True
+
+        a = an_agent(checker=checker)
+
+        async def run():
+            await a.on_user_turn_completed(chat(), llm.ChatMessage(role="user", content=["Hello?"]))
+            a._last_chat_ctx = chat(("user", "Hello?"), ("assistant", "Is this Arjun?"), ("user", "Yes."))
+            return await a._verify(said("Hello?", "Yes."), True)
+
+        asyncio.run(run())
+        self.assertEqual(calls, ["PERSON: Yes."])   # the stale check was cancelled before it ran
 
     def test_nobody_has_answered_yet(self):
         self.assertIn("unknown", verify(self.a, said(), True))
