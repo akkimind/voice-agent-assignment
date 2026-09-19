@@ -3,6 +3,7 @@
     ./install.sh                     # creates .venv, installs packages, then runs this
     ./.venv/bin/python install.py    # just the questions
     ./.venv/bin/python install.py --check   # test the keys already in .env
+    ./.venv/bin/python install.py --trunk   # create the LiveKit SIP trunk from .env
 
 Press Enter to keep a value already in .env. Secrets are typed hidden. Each key
 is sent only to its own service, once, to check it works. .env is written
@@ -14,7 +15,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import getpass
-import json
 import os
 import re
 import subprocess
@@ -27,7 +27,6 @@ from typing import Callable
 
 ROOT = Path(__file__).resolve().parent
 ENV = ROOT / ".env"
-TRUNK_FILE = ROOT / "telephony" / "outbound-trunk.local.json"   # gitignored
 TRUNK_NAME = "adit-outbound"
 
 
@@ -267,39 +266,49 @@ def configure_telephony(values: dict[str, str]) -> None:
         print(f"    {line}")
     input("\n  Press Enter once that is done. ")
 
-    trunk = json.loads(TRUNK_FILE.read_text())["trunk"] if TRUNK_FILE.exists() else {}
-    address = ask(Field("", "Termination SIP address", pattern=domain_pattern,
-                        example={"twilio": "my-clinic.pstn.twilio.com",
-                                 "plivo": "12345678.zt.plivo.com"}.get(choice, "sip.example.com")),
-                  trunk.get("address", ""))
-    caller_id = ask(Field("", "Caller ID, the number calls come from", pattern=r"\+\d{8,15}",
-                          example="+14155550100"), (trunk.get("numbers") or [""])[0])
+    values["SIP_TRUNK_ADDRESS"] = ask(
+        Field("", "Termination SIP address", pattern=domain_pattern,
+              example={"twilio": "my-clinic.pstn.twilio.com", "plivo": "12345678.zt.plivo.com"}.get(
+                  choice, "sip.example.com")), values.get("SIP_TRUNK_ADDRESS", ""))
+    values["SIP_CALLER_ID"] = ask(Field("", "Caller ID, the number calls come from", pattern=r"\+\d{8,15}",
+                                        example="+14155550100"), values.get("SIP_CALLER_ID", ""))
     values["SIP_AUTH_USERNAME"] = ask(Field("", "SIP username (from the credential list)"),
                                       values.get("SIP_AUTH_USERNAME", ""))
     values["SIP_AUTH_PASSWORD"] = ask(Field("", "SIP password", secret=True), values.get("SIP_AUTH_PASSWORD", ""))
-    print("\n  The phone the demo should ring. Patients in patients.json have fictional numbers,")
-    print("  so a real one lives only here. On a trial account it must be a verified number.")
+    print("\n  The phone a demo call rings. The patients in patients.json have fictional numbers,")
+    print("  so for a real call this number is used instead. On a trial account it must be verified.")
     values["DEMO_DIAL_TO"] = ask(Field("", "Phone to call", optional=True, pattern=r"\+\d{8,15}",
                                        example="+919812345678"), values.get("DEMO_DIAL_TO", ""))
+    make_trunk(values)
 
-    TRUNK_FILE.write_text(json.dumps({"trunk": {"name": TRUNK_NAME, "address": address,
-                                                "numbers": [caller_id]}}, indent=2) + "\n")
-    print("\n  Creating the outbound trunk in LiveKit…", end=" ", flush=True)
+
+TRUNK_FIELDS = ("SIP_TRUNK_ADDRESS", "SIP_CALLER_ID", "SIP_AUTH_USERNAME", "SIP_AUTH_PASSWORD")
+
+
+def make_trunk(values: dict[str, str]) -> bool:
+    """Creates the LiveKit outbound trunk from the four SIP values, or updates
+    ours if it exists, and records its id. Rerunning never duplicates it."""
+    missing = [k for k in TRUNK_FIELDS if not values.get(k)]
+    if missing:
+        print(f"  Cannot create the trunk yet; not set: {', '.join(missing)}")
+        return False
+    print("  Creating the outbound trunk in LiveKit…", end=" ", flush=True)
     try:
-        values["SIP_OUTBOUND_TRUNK_ID"] = asyncio.run(_create_trunk(values, address, caller_id))
+        values["SIP_OUTBOUND_TRUNK_ID"] = asyncio.run(_create_trunk(values))
         print(f"done: {values['SIP_OUTBOUND_TRUNK_ID']}")
+        return True
     except Exception as exc:
         print(f"failed: {type(exc).__name__}: {str(exc)[:200]}")
-        print(f"  You can create it by hand with the LiveKit CLI; see README → Phone calls.")
+        return False
 
 
-async def _create_trunk(values: dict[str, str], address: str, caller_id: str) -> str:
-    """Creates the trunk, or updates ours if it exists, so rerunning never duplicates it."""
+async def _create_trunk(values: dict[str, str]) -> str:
     from livekit import api
     client = api.LiveKitAPI(url=values["LIVEKIT_URL"], api_key=values["LIVEKIT_API_KEY"],
                             api_secret=values["LIVEKIT_API_SECRET"])
     try:
-        info = api.SIPOutboundTrunkInfo(name=TRUNK_NAME, address=address, numbers=[caller_id],
+        info = api.SIPOutboundTrunkInfo(name=TRUNK_NAME, address=values["SIP_TRUNK_ADDRESS"],
+                                        numbers=[values["SIP_CALLER_ID"]],
                                         auth_username=values["SIP_AUTH_USERNAME"],
                                         auth_password=values["SIP_AUTH_PASSWORD"])
         existing = await client.sip.list_sip_outbound_trunk(api.ListSIPOutboundTrunkRequest())
@@ -360,10 +369,16 @@ def check_only(values: dict[str, str]) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(prog="install.py", description=__doc__.split("\n")[0])
     parser.add_argument("--check", action="store_true", help="only test the keys already in .env")
+    parser.add_argument("--trunk", action="store_true",
+                        help="create or update the LiveKit SIP trunk from the SIP_* values in .env")
     args = parser.parse_args()
     values = read_env()
     if args.check:
         return check_only(values)
+    if args.trunk:
+        ok = make_trunk(values)
+        write_env(values)
+        return 0 if ok else 1
     print("Setup for the outbound voice agent. Press Enter to keep a value already set.")
     try:
         configure_services(values)

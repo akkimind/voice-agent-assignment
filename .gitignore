@@ -39,5 +39,3 @@ evals/results/
 # The assignment brief and private planning notes: kept locally, not published.
 resources/
 
-# Written by install.py with your real trunk address and caller ID.
-telephony/outbound-trunk.local.json

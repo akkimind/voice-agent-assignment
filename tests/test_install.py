@@ -34,6 +34,13 @@ class EnvFile(unittest.TestCase):
         keys = [line.split("=")[0] for line in self.env.read_text().splitlines() if "=" in line and not line.startswith("#")]
         self.assertLess(keys.index("LIVEKIT_URL"), keys.index("DEEPGRAM_API_KEY"))
 
+    def test_trunk_needs_all_four_sip_values(self):
+        values = {"SIP_TRUNK_ADDRESS": "x.pstn.twilio.com", "SIP_CALLER_ID": "+14155550100"}
+        with mock.patch.object(install, "_create_trunk") as create:
+            self.assertFalse(install.make_trunk(values))
+        create.assert_not_called()
+        self.assertNotIn("SIP_OUTBOUND_TRUNK_ID", values)
+
     def test_masking_shows_only_the_ends(self):
         self.assertEqual(install.masked("gsk_1234567890abcdef"), "gsk_…ef")
         self.assertEqual(install.masked(""), "not set")

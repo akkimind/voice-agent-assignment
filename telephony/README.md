@@ -1,132 +1,95 @@
 # Phone calls
 
-The agent dials through a SIP trunk. LiveKit supports several providers and the
-agent code does not care which one: only the trunk address and credentials
-change. Plivo is the default here because its free trial needs no card and it
-allows calls to India; Twilio is documented after it.
+The agent does not use a phone provider's API. LiveKit places the call through a
+**SIP trunk**, a connection to the phone network that the provider sells, and
+the agent code does not care which provider it is: only four values in `.env`
+change.
+
+| `.env` value | What it is |
+| --- | --- |
+| `SIP_TRUNK_ADDRESS` | The provider's termination SIP address, e.g. `my-clinic.pstn.twilio.com` |
+| `SIP_CALLER_ID` | The number calls come from, in international format, e.g. `+14155550100` |
+| `SIP_AUTH_USERNAME`, `SIP_AUTH_PASSWORD` | The credential list attached to the provider's trunk |
+
+From those, `install.py` creates the trunk in LiveKit and writes its id,
+`SIP_OUTBOUND_TRUNK_ID`, which is the only one the agent reads at call time.
 
 ---
 
-## Part 1 — what you do in Plivo
+## 1. Set up the trunk at the provider
 
-1. **Sign up** at [console.plivo.com](https://console.plivo.com). The trial
-   credit arrives without a credit card.
+### Twilio
 
-2. **Verify the phone you want to call.** Phone Numbers → Sandbox Numbers → add
-   your mobile and confirm the code. A trial account can only call numbers
-   verified this way, which is exactly what a demo needs.
+At [console.twilio.com](https://console.twilio.com), on a **paid** account: a
+trial account cannot use Elastic SIP Trunking.
 
-3. **Create a credential.** Zentrunk → Trunk Authentication → Credentials List →
-   Add New.
-   - Username: 5–20 letters and digits.
-   - Password: 5–20 characters, must include one of `~!@#$%^&*()_+`.
-   - Write both down; they go in `.env`, never in the repo.
+1. **Communication → Voice → Manage → Credential lists → Create new credential
+   list.** Choose a username and password: `SIP_AUTH_USERNAME` and
+   `SIP_AUTH_PASSWORD`.
+2. **Communication → Voice → Elastic SIP Trunking → Manage → Trunks → Create new
+   SIP Trunk.**
+3. In the trunk, **Termination** tab: set the **Termination SIP URI**, e.g.
+   `my-clinic.pstn.twilio.com` (without `sip:`): `SIP_TRUNK_ADDRESS`. Same tab,
+   **Authentication → Credential Lists**: select the list from step 1.
+4. In the trunk, **Numbers** tab: add a number you own: `SIP_CALLER_ID`.
+5. Skip **Origination**; that is for incoming calls.
 
-4. **Create the outbound trunk.** Zentrunk → Outbound Trunks → Create New.
-   - Attach the credential list from step 3.
-   - Turn on TLS ("secure") if offered.
+### Plivo
 
-5. **Copy the Termination SIP Domain.** It looks like
-   `<trunk_id>.zt.plivo.com`. No phone number purchase is needed for outbound
-   calling.
+At [console.plivo.com](https://console.plivo.com). The trial needs no card and
+allows calls to India.
 
-6. **Decide the caller ID.** Plivo requires the number you call *from* to be one
-   you own or have verified. If the console refuses your own mobile as a
-   verified caller ID (verification is mainly US), buy the cheapest Plivo number
-   and use that. This is the one step that may cost a little.
+1. **Phone Numbers → Sandbox Numbers**: add and verify the phone you will call.
+   A trial can only call verified numbers.
+2. **Zentrunk → Trunk Authentication → Credentials List → Add New**: username
+   5–20 letters and digits, password 5–20 characters including one of
+   `~!@#$%^&*()_+`.
+3. **Zentrunk → Outbound Trunks → Create New**, with that credentials list.
+4. Copy its **Termination SIP Domain**, `<trunk_id>.zt.plivo.com`:
+   `SIP_TRUNK_ADDRESS`.
+5. The caller ID must be a number you rent from Plivo or have verified.
 
-7. **Authorise the LiveKit CLI** once, so I can create the trunk:
+### Others
 
-   ```shell
-   lk cloud auth
-   ```
-
-Then send me the **termination domain** and the **caller ID number**. Keep the
-password to yourself; put it in `.env` as described below.
-
-## Part 2 — what I do
-
-1. Put the domain and caller ID into `outbound-trunk.json`.
-2. Create the LiveKit trunk and record its id in `.env` as
-   `SIP_OUTBOUND_TRUNK_ID`.
-3. Place a silent test call: your phone rings, then silence, because no agent is
-   in the room. Silence is a pass.
-4. Run a real call with the agent and check the transcript, the analysis and the
-   Opik trace.
-5. Test the failure paths: you decline one call, and let another ring out.
-
-## Part 3 — your `.env`
-
-```shell
-SIP_AUTH_USERNAME='...'      # step 3
-SIP_AUTH_PASSWORD='...'      # step 3
-SIP_OUTBOUND_TRUNK_ID='ST_...'   # I fill this in after creating the trunk
-```
-
-`.env` is gitignored and chmod 600. Nothing from it is printed in full: phone
-numbers are masked to their last four digits everywhere they are logged or sent
-to Opik.
+Any provider LiveKit supports ([docs.livekit.io/telephony](https://docs.livekit.io/telephony/)):
+Telnyx, Sinch, Wavix, DIDLogic and more. You need the same four values.
 
 ---
 
-## Creating the trunk
-
-`outbound-trunk.json` holds the provider side:
-
-```json
-{
-  "trunk": {
-    "name": "adit-outbound",
-    "address": "<trunk_id>.zt.plivo.com",
-    "numbers": ["<caller id in E.164>"]
-  }
-}
-```
+## 2. Create the trunk in LiveKit
 
 ```shell
-lk sip outbound create telephony/outbound-trunk.json \
-  --auth-user "$SIP_AUTH_USERNAME" \
-  --auth-pass "$SIP_AUTH_PASSWORD"
+./.venv/bin/python install.py            # answer yes to phone calls; it asks for the four values
+./.venv/bin/python install.py --trunk    # or: fill the four values into .env yourself, then this
 ```
 
-Record the returned trunk id in `.env`.
-
-### Silent test, without the agent
-
-Put the trunk id into `participant.json`, then:
-
-```shell
-lk sip participant create telephony/participant.json
-lk room participants get --room spike-room sip-test
-```
-
-Expect `kind` of `SIP` with a populated `sip.callID`. Your phone rings and the
-line is silent, because no agent has joined. That is the pass condition.
+Either one creates the outbound trunk through LiveKit's API, or updates it if it
+already exists, and writes `SIP_OUTBOUND_TRUNK_ID` into `.env`. Change a value
+and run `--trunk` again to update the trunk.
 
 ---
 
-## Making real calls
+## 3. Call
 
 ```shell
-python agent.py dev                          # worker, in one terminal
-python dispatch_outbound.py                  # first callable patient
-python dispatch_outbound.py --patient p-002
-python dispatch_outbound.py --phone +91...   # override the stored number
-python dispatch_outbound.py --browser        # no phone; join the room yourself
+./.venv/bin/python agent.py dev          # the worker, in one terminal
+./.venv/bin/python dispatch_outbound.py  # a call, in another
 ```
 
-`dispatch_outbound.py` only starts the agent in a new room. The agent dials from
-inside the room, because it must be there before the phone rings.
+In real use the agent calls the number in the patient's record. The five
+patients in `patients.json` are fictional, with `+1 555 555 01xx` numbers, so a
+demo needs a real phone: set `DEMO_DIAL_TO` in `.env`, or pass `--phone` for a
+one-off. See [Running](../README.md#running) in the main README.
 
 ### What happens on a call
 
 | Step | Behaviour |
 | --- | --- |
-| Dialling | `wait_until_answered`, so the agent never speaks over the ringtone |
-| Answered | The agent waits ~2.5s for "hello" first, then asks for the patient |
-| Nobody answers | Recorded as `no_answer` or `rejected`, analysed and sent to Opik with no model involved |
-| Goodbye | The agent hangs up ~2s after its closing words |
-| Limits | 30s of ringing, 15 minutes per call |
+| Dialling | The agent joins the room first, then dials and waits for an answer, so it never speaks over the ringtone |
+| Answered | It waits about 2.5 s for "hello", then asks for the patient |
+| Nobody answers | Recorded as `no_answer` or `rejected`, analysed, and sent to Opik with no model involved |
+| Goodbye | The agent ends the call itself, about 2 s after its closing words |
+| Limits | 30 s of ringing, 15 minutes per call |
 
 ---
 
@@ -135,11 +98,12 @@ inside the room, because it must be there before the phone rings.
 | Symptom | Cause |
 | --- | --- |
 | `ServerError`, no SIP traffic | malformed request fields |
-| 401 / 403 | credentials do not match the provider's credential list |
-| 404 | wrong termination domain in `outbound-trunk.json` |
+| 401 / 403 | the SIP username or password does not match the provider's credential list |
+| 404 | wrong `SIP_TRUNK_ADDRESS` |
 | 503 | trunk address unreachable |
 | 486 / 603 | the carrier or the callee rejected the call |
-| Trial-only rejection to your mobile | the number is not sandboxed (Plivo) or not verified (Twilio) |
+| Trial-only rejection to your mobile | the number is not verified (Twilio) or not sandboxed (Plivo) |
+| 403 or 603 on a Twilio trial | termination is not enabled on trial accounts; upgrade the account |
 
 | SIP status | Recorded outcome |
 | --- | --- |
@@ -151,33 +115,10 @@ inside the room, because it must be there before the phone rings.
 
 ## Calling India
 
-- Plivo's own account notes say voice traffic to the US and India needs no
+- Plivo's account notes say voice traffic to the US and India needs no
   minimum-spend agreement; other countries do.
 - From an account registered outside India, calls reach Indian numbers over
   international routes. Domestic routes are for India-registered businesses.
 - India's rules require consent before commercial calls, and cold calling is
   prohibited. Calling your own verified number for a demo is fine; a real
   deployment needs DLT registration and a consent trail.
-
----
-
-## Twilio instead
-
-The same shape, different console, at [console.twilio.com](https://console.twilio.com).
-Trial accounts cannot use Elastic SIP Trunking; the account must be upgraded.
-
-1. **Communication → Voice → Manage → Credential lists → Create new credential
-   list**, with a username and password.
-2. **Communication → Voice → Elastic SIP Trunking → Manage → Trunks → Create new
-   SIP Trunk.**
-3. **Termination** tab: set a Termination SIP URI and, under **Authentication →
-   Credential Lists**, attach the list. Copy the domain, e.g.
-   `your-trunk.pstn.twilio.com`, without the `sip:` prefix.
-4. **Numbers** tab: attach the number you will call from.
-5. Skip **Origination** entirely; that is for inbound calls.
-
-Then `install.py` creates the LiveKit trunk from those values, or run the same
-`lk sip outbound create` command with that domain.
-
-A 403 or 603 on a Twilio trial usually means termination is not enabled on the
-account, which is an account limitation rather than a configuration mistake.
