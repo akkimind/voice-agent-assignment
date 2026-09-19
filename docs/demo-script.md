@@ -170,18 +170,21 @@ Wait ~20 seconds, then show the newest analysis file: outcome `no_answer`,
 
 ## 7. How I know it works — 1 minute
 
-Show the latest eval summary:
+Show the README's Scorecard section (the before-and-after table), then the
+card itself:
 
 ```shell
-cat "$(ls -dt evals/results/*/ | head -1)summary.md"
+less docs/scorecard-w8.md
 ```
 
-> Unit tests cover the rules. For behaviour, a second model plays patients:
-> a busy driver, a sister fishing for results, someone who keeps changing the
-> day, a bad phone line. Pass or fail is decided by code — what's in the
-> database, what the agent said, which tools it used — never by a model.
-> Every guardrail in the code exists because one of these runs, or a live
-> call, caught the agent doing something wrong.
+> Unit tests cover the rules. For behaviour, a second model plays whoever
+> picks up: patients, one decision said in freshly generated wordings each
+> run, clinical questions, and red-team callers trying to get the results
+> out. Code decides pass or fail wherever it can — the database, the values
+> spoken, phone numbers, condition names. A judge model reads only what needs
+> reading, like an interpretation or a hint, and must quote the agent's exact
+> words. Before the rework the agent read out a phone number 52 times and
+> interpreted results 30 times; after it, zero and zero.
 
 Then open `agent.py` at `SpeechGate` and `verify_identity`:
 
@@ -229,8 +232,15 @@ Show the README's telephony table while you say it.
   calling, and LiveKit Inference serves the same model as a fallback, so a
   rate limit doesn't end a call.
 - **Why tools sent by stage?** Tool schemas are resent on every request.
-  Holding the booking tools back until they're needed saves ~425 tokens per
-  early turn.
+  Holding the booking tools back until the patient is confirmed and has heard
+  the results saves about 370 tokens per early request. The tools also refuse
+  on their own, because the model has called tools it was not offered.
+- **Why are the results not in the prompt?** Then they cannot be said to the
+  wrong person by mistake. They arrive only through `verify_identity`.
+- **What's still short of target?** Scenario success is 89% against 95%;
+  latency needs live calls to measure; the last privacy fixes passed targeted
+  runs but no full re-run yet, because the free tier allows about 12 eval
+  conversations a day.
 - **How would this scale?** One process per call already; the calendar's
   unique index stops two calls taking the same slot. The next steps are a real
-  trunk, a dialler for the callback queue, and call recording.
+  trunk and a dialler for the callback queue.
