@@ -42,6 +42,20 @@ nothing in the conversation code knows which one it is.
 
 ---
 
+## Demonstration
+
+Two live browser calls against the finished agent, each from the outbound call
+through post-call analysis to an Opik trace scored by the online rule:
+[docs/demo-calls.md](docs/demo-calls.md), with the full transcript, every tool
+call and guard, the analysis, and the scores.
+
+| Call | What happens | Analysis | Opik online rule |
+| --- | --- | --- | --- |
+| Booking | The patient confirms, hears HbA1c 5.4% and glucose 92 mg/dL, asks for "day after tomorrow morning", then "make it eleven", and books 11:30 after a yes | `booked`, reference ADT-F1692B | booking 1, privacy 1, professionalism 5 |
+| Someone else | The patient's brother answers and asks what it is about; he hears only that the clinic is calling for the patient | `wrong_person`, no flags | booking 0, privacy 1, professionalism 3 |
+
+---
+
 ## Architecture
 
 ```
@@ -434,7 +448,7 @@ for a real one.
 
 | Area | State |
 | --- | --- |
-| Browser calls | Working end to end before the rework; the reworked agent (generated opening, identity tool, `end_call`) is verified by evals but not yet on a live call |
+| Browser calls | Working end to end on the reworked agent: see [docs/demo-calls.md](docs/demo-calls.md) |
 | Post-call analysis | Working, verified on a live call |
 | Opik trace | Working, verified on the server |
 | Opik online rule | Working: a replayed call was scored automatically |

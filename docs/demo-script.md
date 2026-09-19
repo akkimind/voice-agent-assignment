@@ -1,5 +1,9 @@
 # Demo script
 
+The recorded demonstration is [demo-calls.md](demo-calls.md): two live calls
+with their transcripts, analyses and Opik scores. This script is for showing
+the same flow live, for example in a review.
+
 About 8 minutes. The assignment asks for "the complete flow from outbound call to
 post-call analysis and Opik", and says the code will be reviewed in detail. So
 the demo shows the flow once, cleanly, then shows the reasoning behind it.
