@@ -69,9 +69,12 @@ Use an empty list if the agent did none of them. Quote exactly; do not paraphras
 def build_llm() -> Any:
     from livekit.agents import inference, llm
     from livekit.plugins import openai
+    groq = openai.LLM(model=JUDGE_MODEL, base_url=config.GROQ_BASE_URL, api_key=os.environ["GROQ_API_KEY"],
+                      reasoning_effort="medium")
+    if not config.paid_fallback():
+        return config.groq_only(groq)
     return llm.FallbackAdapter([
-        openai.LLM(model=JUDGE_MODEL, base_url=config.GROQ_BASE_URL, api_key=os.environ["GROQ_API_KEY"],
-                   reasoning_effort="medium"),
+        groq,
         inference.LLM(model=JUDGE_MODEL, extra_kwargs={"reasoning_effort": "medium"}),
     ], max_retry_per_llm=0)
 

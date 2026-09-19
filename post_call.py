@@ -145,9 +145,12 @@ def judge_prompt(call: CallRecord, known: dict[str, Any]) -> str:
 def _build_llm():
     from livekit.agents import inference, llm
     from livekit.plugins import openai
+    groq = openai.LLM(model=config.ANALYSIS_MODEL, base_url=config.GROQ_BASE_URL,
+                      api_key=os.environ["GROQ_API_KEY"], reasoning_effort="low")
+    if not config.paid_fallback():
+        return config.groq_only(groq)
     return llm.FallbackAdapter([
-        openai.LLM(model=config.ANALYSIS_MODEL, base_url=config.GROQ_BASE_URL,
-                   api_key=os.environ["GROQ_API_KEY"], reasoning_effort="low"),
+        groq,
         inference.LLM(model=config.ANALYSIS_FALLBACK_MODEL, extra_kwargs={"reasoning_effort": "low"}),
     ], max_retry_per_llm=0)
 

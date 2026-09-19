@@ -40,9 +40,17 @@ def main() -> int:
     parser.add_argument("--patients", default="rotate",
                         help="rotate (default: each run of a persona meets a different patient), all "
                              "(every persona with every patient), or comma-separated ids, e.g. p-002,p-005")
-    # Four at once made both providers refuse; three keeps the run under their limits.
-    parser.add_argument("--workers", type=int, default=3, help="conversations in parallel (default 3)")
+    parser.add_argument("--workers", type=int, default=None,
+                        help="conversations in parallel (default 1 on the free tier, 3 with --allow-paid)")
+    parser.add_argument("--allow-paid", action="store_true",
+                        help="let LiveKit Inference serve what Groq refuses; this spends LiveKit credit")
     args = parser.parse_args()
+    # Free by default: every model in the run is Groq only, so a test run never
+    # spends credit. Groq's free tier allows 8,000 tokens a minute per model,
+    # which one conversation at a time stays near.
+    import os
+    os.environ["LLM_PAID_FALLBACK"] = "on" if args.allow_paid else "off"
+    args.workers = args.workers or (3 if args.allow_paid else 1)
 
     only = {x.strip() for x in args.only.split(",") if x.strip()}
     chosen = [x.strip() for x in args.suite.split(",") if x.strip()]
@@ -52,12 +60,17 @@ def main() -> int:
         return 2
     db_dir = tempfile.mkdtemp(prefix="evals-db-")
     worker.init(db_dir)  # the parent also needs the project importable, and generates the wordings
+    if not args.allow_paid and (refused := _daily_limit_reached()):
+        print(f"Groq's free daily limit is reached: {refused}\nNothing was run. Try later, or pass --allow-paid.",
+              file=sys.stderr)
+        return 3
     jobs, notes = suites.plan(chosen, runs=args.runs, phrasings=args.phrasings, only=only,
                               patients=args.patients, every_patient=worker.patient_ids())
     if not jobs:
         print("No cases match.", file=sys.stderr)
         return 2
-    print(f"{len(jobs)} conversations ({', '.join(chosen)}), {args.workers} in parallel", flush=True)
+    print(f"{len(jobs)} conversations ({', '.join(chosen)}), {args.workers} in parallel, "
+          f"{'Groq with LiveKit fallback (paid)' if args.allow_paid else 'Groq free tier only'}", flush=True)
     for note in notes:
         print(f"  note: {note}", flush=True)
 
@@ -79,6 +92,13 @@ def main() -> int:
             said = f"  {r['phrase']!r}" if r.get("phrase") else ""
             print(f"  [{done}/{len(jobs)}] {MARK[r['status']]} {r['id']:>18} run {r['run']} "
                   f"{r.get('patient_id', '')}  {r['seconds']}s{said}", flush=True)
+            if r["status"] == "crash" and not args.allow_paid:
+                # On the free tier a crash that survived a retry is almost always
+                # the daily limit. Everything after it would crash too.
+                cancelled = sum(f.cancel() for f in futures if not f.done())
+                notes.append(f"stopped after a crash, most likely Groq's daily limit; {cancelled} not run")
+                print(f"  stopping: {notes[-1]}", flush=True)
+                break
 
     elapsed = time.monotonic() - started
     out = RESULTS_DIR / datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -90,6 +110,31 @@ def main() -> int:
     print(summary)
     print(f"Saved to {out}")
     return 0 if all(r["status"] in ("pass", "invalid") for r in results) else 1
+
+
+def _daily_limit_reached() -> str | None:
+    """One agent-sized request to each model. Groq's free tier counts tokens per
+    rolling day; its response headers do not show that limit, and once it is
+    reached every request waits and retries, so a run crawls instead of failing.
+    Returns Groq's own message when a model is over its limit."""
+    import os
+    import re as _re
+
+    from openai import OpenAI, RateLimitError
+
+    import config
+    client = OpenAI(base_url=config.GROQ_BASE_URL, api_key=os.environ["GROQ_API_KEY"], max_retries=0)
+    probe = "word " * 1500   # about what one agent request carries
+    for model in (config.LLM_MODEL, config.ANALYSIS_MODEL):
+        try:
+            client.chat.completions.create(model=model, max_completion_tokens=1,
+                                           messages=[{"role": "user", "content": probe}])
+        except RateLimitError as exc:
+            text = str(exc)
+            if "per day" in text:
+                wait = _re.search(r"try again in ([\w.]+)", text)
+                return f"{model}, try again in {wait.group(1) if wait else 'a while'}"
+    return None
 
 
 def _summary(results: list[dict], elapsed: float) -> str:

@@ -184,8 +184,12 @@ async def run(case: Any, run_no: int, patient_id: str) -> Result:
     if case.expect_tool:
         result.facts["right_tool"] = any(c["tool"] == case.expect_tool and not c["refused"]
                                          for c in result.facts["tool_calls"])
-    if turns and os.environ.get("EVALS_JUDGE", "1") != "0":
+    # On the free tier the judge reads only the suites whose verdict it decides:
+    # it runs on the same model as the agent and shares its daily tokens.
+    judge_all = os.environ.get("LLM_PAID_FALLBACK", "on") != "off"
+    if turns and os.environ.get("EVALS_JUDGE", "1") != "0" and (judge_all or case.suite in JUDGED_SUITES):
         await _judge(result, patient, case)
+        result.facts["judged"] = True
     if result.status == "pass" and result.errors:
         result.status = "fail"
     if result.analysis:

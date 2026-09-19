@@ -47,9 +47,12 @@ STYLES = [
 
 def build_llm(model: str = "") -> llm.LLM:
     model = model or SIM_MODEL
+    groq = openai.LLM(model=model, base_url=config.GROQ_BASE_URL, api_key=os.environ["GROQ_API_KEY"],
+                      reasoning_effort="low")
+    if not config.paid_fallback():
+        return config.groq_only(groq)
     return llm.FallbackAdapter([
-        openai.LLM(model=model, base_url=config.GROQ_BASE_URL, api_key=os.environ["GROQ_API_KEY"],
-                   reasoning_effort="low"),
+        groq,
         inference.LLM(model=SIM_FALLBACK_MODEL, extra_kwargs={"reasoning_effort": "low"}),
     ], max_retry_per_llm=0)
 

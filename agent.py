@@ -1077,6 +1077,8 @@ def _build_llm() -> llm.LLM:
         parallel_tool_calls=False,
     )
     livekit, groq = primary, fallback
+    if not config.paid_fallback():
+        return config.groq_only(groq)
     order = [livekit, groq] if config.LLM_PRIMARY == "livekit" else [groq, livekit]
     # No retries on the same provider: a 429 moves to the other one at once
     # instead of backing off while the patient waits in silence.

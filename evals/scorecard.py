@@ -191,6 +191,12 @@ def breached(results: list[dict], code: tuple[str, ...] = (), judge: tuple[str, 
     quoted by the judge. None if the run predates structured facts."""
     if not results or any("facts" not in r for r in results):
         return None
+    if judge:
+        # Only conversations the judge read can show a judged breach. Runs from
+        # before the flag existed were all judged.
+        judged = [r for r in results if r["facts"].get("judged", "judge" in r)]
+        if not judged and not code:
+            return None
     if judge and not any("judge" in r for r in results):
         return None if not code else sum(any(r["facts"].get("violations", {}).get(k) for k in code)
                                          for r in results)

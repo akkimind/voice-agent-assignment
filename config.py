@@ -25,6 +25,20 @@ LIVEKIT_LLM_MODEL = "openai/gpt-oss-120b"
 # including a rate limit. Measured from this machine: Groq direct ~1.15 s to
 # first token, LiveKit Inference ~2.1 s (any upstream, even Groq).
 LLM_PRIMARY = "groq"   # or "livekit"
+
+
+def paid_fallback() -> bool:
+    """Whether LiveKit Inference may serve requests Groq refuses. On for calls, so
+    a rate limit never ends one; evals switch it off unless --allow-paid, so a
+    test run spends no credit."""
+    return os.environ.get("LLM_PAID_FALLBACK", "on") != "off"
+
+
+def groq_only(model: Any) -> Any:
+    """The free tier alone: wait out the per-minute limit instead of failing.
+    Groq allows 8,000 tokens a minute per model."""
+    from livekit.agents import llm
+    return llm.FallbackAdapter([model], attempt_timeout=30, max_retry_per_llm=5, retry_interval=15)
 LLM_REASONING_EFFORT = "low"
 
 # Post-call judgement. The hard facts (booking, callback) come from code, so the
