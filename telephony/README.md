@@ -163,18 +163,21 @@ inside the room, because it must be there before the phone rings.
 
 ## Twilio instead
 
-The same shape, different console. Twilio trial accounts often refuse Elastic
-SIP Trunking termination until the account is upgraded, which is why Plivo is
-the default here.
+The same shape, different console, at [console.twilio.com](https://console.twilio.com).
+Trial accounts cannot use Elastic SIP Trunking; the account must be upgraded.
 
-1. Voice → Credential lists → create one with a username and password.
-2. Elastic SIP Trunking → Trunks → create a trunk.
-3. Termination tab → set a Termination SIP URI and attach the credential list.
-   Copy the domain, e.g. `your-trunk.pstn.twilio.com`, without the `sip:` prefix.
-4. Numbers tab → attach the number you will call from.
-5. Skip Origination entirely; that is for inbound calls.
+1. **Communication → Voice → Manage → Credential lists → Create new credential
+   list**, with a username and password.
+2. **Communication → Voice → Elastic SIP Trunking → Manage → Trunks → Create new
+   SIP Trunk.**
+3. **Termination** tab: set a Termination SIP URI and, under **Authentication →
+   Credential Lists**, attach the list. Copy the domain, e.g.
+   `your-trunk.pstn.twilio.com`, without the `sip:` prefix.
+4. **Numbers** tab: attach the number you will call from.
+5. Skip **Origination** entirely; that is for inbound calls.
 
-Then the same `lk sip outbound create` command with that domain.
+Then `install.py` creates the LiveKit trunk from those values, or run the same
+`lk sip outbound create` command with that domain.
 
 A 403 or 603 on a Twilio trial usually means termination is not enabled on the
 account, which is an account limitation rather than a configuration mistake.

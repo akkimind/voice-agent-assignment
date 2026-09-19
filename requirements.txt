@@ -3,7 +3,6 @@ livekit-agents~=1.8
 livekit-plugins-deepgram~=1.8
 livekit-plugins-openai~=1.8
 livekit-plugins-silero~=1.8
-livekit-plugins-turn-detector~=1.8
 
 # Opik observability and evaluation
 opik~=2.2

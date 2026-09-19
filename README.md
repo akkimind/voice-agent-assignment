@@ -90,6 +90,7 @@ dispatch_outbound.py ──► LiveKit ──► agent.py (the call)
 | `telephony.py` | Dialling and SIP status codes. The only file that knows about phones |
 | `dispatch_outbound.py` | Starts one call from the command line |
 | `evals/` | Simulated patients that talk to the real agent |
+| `install.sh`, `install.py` | Setup: environment, packages, and every key, checked |
 
 ### Decisions worth defending
 
@@ -148,42 +149,111 @@ and the log says why.
 
 ## Setup
 
+### Before you start
+
+- **Python 3.11 or newer** and **git**. Check with `python3 --version`.
+- Accounts, all with free tiers: **LiveKit Cloud**, **Groq**, **Deepgram**, and
+  optionally **Opik**. For real phone calls, also a **paid** account with a SIP
+  provider such as Twilio. The installer shows where each key is.
+
+### Install
+
 ```shell
-python -m venv .venv
+git clone https://github.com/akkimind/voice-agent-assignment.git
+cd voice-agent-assignment
+./install.sh
+```
+
+`install.sh` does three things:
+
+1. Creates a virtual environment in `.venv`, so nothing is installed system-wide.
+2. Installs the Python packages in `requirements.txt` into it:
+
+   | Package | What it is for |
+   | --- | --- |
+   | `livekit-agents` | The voice agent framework: rooms, turns, tools, sessions |
+   | `livekit-plugins-deepgram` | Speech to text and text to speech |
+   | `livekit-plugins-openai` | Talks to Groq, which speaks the OpenAI API |
+   | `livekit-plugins-silero` | Voice activity detection: when the caller is speaking |
+   | `opik` | Sends each call to Opik and manages the evaluation rule |
+   | `python-dotenv` | Reads the keys from `.env` |
+
+   Their own dependencies (the LiveKit API client, the OpenAI client and so on)
+   come with them.
+3. Runs `install.py`, which asks for everything the project needs, one service
+   at a time. For each one it prints the link and the console path to the key,
+   asks for the value (secrets are typed hidden; Enter keeps a value already
+   set), and checks that the key works with one small request to that service.
+   Then it writes `.env`, readable only by you and never committed; creates the
+   clinic database (`clinic.db`: tables, the five fictional patients, a few
+   taken slots); creates the Opik evaluation rule; and, if you want phone calls,
+   creates the SIP trunk in LiveKit for you (see [Phone calls](#phone-calls-implemented-not-funded)).
+
+Run it again at any time to change a value. `./.venv/bin/python install.py
+--check` tests the keys already in `.env` without asking anything.
+
+### Install by hand
+
+The same steps without the installer:
+
+```shell
+python3 -m venv .venv
 ./.venv/bin/pip install -r requirements.txt
-cp .env.example .env     # then fill it in
+cp .env.example .env && chmod 600 .env    # then fill it in, see the table below
+./.venv/bin/python db.py --reset          # clinic database with the fictional patients
+./.venv/bin/python opik_rules.py apply    # the Opik evaluation rule (needs the Opik keys)
+./.venv/bin/python install.py --check     # confirm the keys work
 ```
 
-### Keys
+### Where each key comes from
 
-| Variable | Where from | Needed for |
+Console menus move over time; if one is not where described, use the console's
+search box.
+
+| Variable | Service | Where to get it |
 | --- | --- | --- |
-| `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | [cloud.livekit.io](https://cloud.livekit.io) → Project settings → Keys | Every call |
-| `GROQ_API_KEY` | [console.groq.com/keys](https://console.groq.com/keys) | The agent and the post-call analysis |
-| `DEEPGRAM_API_KEY` | [console.deepgram.com](https://console.deepgram.com) | Speech in and out |
-| `OPIK_API_KEY`, `OPIK_WORKSPACE` | [comet.com/opik](https://www.comet.com/opik) → user menu → API key | Sending calls to Opik |
-| `SIP_*` | Your SIP provider, see [telephony/README.md](telephony/README.md) | Real phone calls only |
+| `LIVEKIT_URL` | [LiveKit Cloud](https://cloud.livekit.io) | Create a project. **Settings → Project → URL**, starting `wss://` |
+| `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | [LiveKit Cloud](https://cloud.livekit.io) | **Settings → API Keys → Create key**. The secret is shown once |
+| `GROQ_API_KEY` | [Groq](https://console.groq.com) | **API Keys** ([console.groq.com/keys](https://console.groq.com/keys)) **→ Create API Key**. Shown once |
+| `DEEPGRAM_API_KEY` | [Deepgram](https://console.deepgram.com) | **Projects** menu (top left) → your project → **Settings → API Keys → Create a New API Key**. Shown once |
+| `OPIK_API_KEY` | [Opik](https://www.comet.com/opik) (optional) | Your avatar (top right) **→ API Key** |
+| `OPIK_WORKSPACE` | [Opik](https://www.comet.com/opik) (optional) | The name in the address bar after `/opik/`, e.g. `comet.com/opik/<workspace>/projects` |
+| `SIP_AUTH_USERNAME`, `SIP_AUTH_PASSWORD` | Your SIP provider (phone calls only) | The credential list you create on the trunk; see [Phone calls](#phone-calls-implemented-not-funded) |
+| `SIP_OUTBOUND_TRUNK_ID` | LiveKit (phone calls only) | Written by the installer when it creates the trunk, or printed by `lk sip outbound create` |
+| `DEMO_DIAL_TO` | You (phone calls only) | The real phone a demo call rings, e.g. `+919812345678`. Patients in `patients.json` have fictional numbers |
 
-Without the Opik keys everything still works; calls simply are not sent.
-
-### Database
-
-```shell
-./.venv/bin/python db.py --reset     # tables, seed patients, a few taken slots
-```
+Without the Opik keys everything still works; calls simply are not sent to Opik.
+Groq's free tier allows about 200,000 tokens a day per model: plenty for calls,
+about 12 eval conversations a day.
 
 ---
 
 ## Running
 
 ```shell
-./.venv/bin/python agent.py console --record # talk to it in the terminal, recorded
-./.venv/bin/python agent.py dev              # worker; join the room in a browser
-./.venv/bin/python dispatch_outbound.py      # ring a real phone (needs SIP setup)
+./.venv/bin/python agent.py console --record   # talk to it in this terminal, recorded
+./.venv/bin/python agent.py dev                # start the worker, then in a second terminal:
+./.venv/bin/python dispatch_outbound.py --browser            # a call you join in the browser
+./.venv/bin/python dispatch_outbound.py                      # a real phone call
+./.venv/bin/python dispatch_outbound.py --patient p-002 --phone +919812345678
 ```
 
-For a browser call, run `agent.py dev`, then open your LiveKit project's
-playground and join the room the worker prints.
+`agent.py dev` starts the worker: it connects to LiveKit and waits for calls.
+`dispatch_outbound.py` starts one call. It picks a patient from the database
+(the first without an appointment, or the one given with `--patient`), and asks
+LiveKit to put the agent in a new room with that patient's id. It does not dial
+itself; the agent does, from inside the room, so it is there before the phone
+rings. Patients who already have an appointment are never called.
+
+Which phone rings, in order: the number given with `--phone`, else
+`DEMO_DIAL_TO` from `.env`, else the patient's own number from `patients.json`.
+The five patients carry fictional `+1 555 555 01xx` numbers, so for a real call
+set `DEMO_DIAL_TO` or pass `--phone`, in international format (`+` and country
+code).
+
+With `--browser` no phone is involved: it prints a link to join the call from
+your browser as the patient. `--simulate-status 486` (busy) or `487` (no answer)
+places no call at all and exercises what happens when nobody picks up.
 
 Each call writes:
 
@@ -270,7 +340,7 @@ key not configured for LLM" until a provider key is added to the workspace.
 ## Testing
 
 ```shell
-./.venv/bin/python -m unittest                        # 216 tests, no network
+./.venv/bin/python -m unittest                        # 222 tests, no network
 ./.venv/bin/python -m evals                           # every suite, Groq free tier only
 ./.venv/bin/python -m evals --allow-paid              # LiveKit Inference may serve the rest (spends credit)
 ./.venv/bin/python -m evals --suite probes --only P:evening --phrasings 8
@@ -405,15 +475,57 @@ provider, not by the code:
 | Sinch | Signup rejects the same addresses, including a university one |
 | LiveKit Phone Numbers | Inbound only; their docs state outbound needs a third-party provider |
 
-Enabling it is a configuration change, not a code change. With any
-LiveKit-supported trunk (Twilio, Telnyx, Plivo, Sinch, Wavix, DIDLogic):
+Enabling it is a configuration change, not a code change, with any
+LiveKit-supported trunk (Twilio, Telnyx, Plivo, Sinch, Wavix, DIDLogic). The
+agent does not use a provider's API: LiveKit places the call through a **SIP
+trunk**, a connection to the phone network that the provider sells.
 
-1. Put the trunk address and caller ID in `telephony/outbound-trunk.json`.
-2. Set `SIP_AUTH_USERNAME`, `SIP_AUTH_PASSWORD` and `SIP_OUTBOUND_TRUNK_ID`.
-3. `python dispatch_outbound.py --patient p-001`
+**1. In the provider's console.** For Twilio, on a paid account (a trial
+account cannot use Elastic SIP Trunking), at [console.twilio.com](https://console.twilio.com):
 
-See [telephony/README.md](telephony/README.md) for the provider steps and the
-SIP status codes. On a real line the agent dials from inside the room, waits for
+1. **Communication → Voice → Manage → Credential lists → Create new credential
+   list.** Choose a username and password.
+2. **Communication → Voice → Elastic SIP Trunking → Manage → Trunks → Create new
+   SIP Trunk.**
+3. In the trunk, **Termination** tab: set the **Termination SIP URI**, e.g.
+   `my-clinic.pstn.twilio.com`. Same tab, **Authentication → Credential Lists**:
+   select the list from step 1.
+4. In the trunk, **Numbers** tab: add a number you own. Calls show it as the
+   caller ID.
+5. Skip **Origination**; that is for incoming calls.
+
+For Plivo and others, see [telephony/README.md](telephony/README.md).
+
+**2. Create the trunk in LiveKit.** Run `./install.sh` (or `./.venv/bin/python
+install.py`), answer yes to phone calls, and give it the termination address,
+the caller ID, and the credential list's username and password. It creates the
+trunk through LiveKit's API and writes `SIP_OUTBOUND_TRUNK_ID` into `.env`.
+
+To do it by hand instead, with the [LiveKit CLI](https://docs.livekit.io/home/cli/)
+(`curl -sSL https://get.livekit.io/cli | bash` on Linux, `brew install
+livekit-cli` on macOS):
+
+```shell
+lk cloud auth                                   # once: link the CLI to your project
+cp telephony/outbound-trunk.json telephony/outbound-trunk.local.json
+# edit the .local copy: "address" is the termination address, "numbers" the caller ID
+lk sip outbound create telephony/outbound-trunk.local.json \
+  --auth-user "$SIP_AUTH_USERNAME" --auth-pass "$SIP_AUTH_PASSWORD"
+# put the ST_... id it prints into .env as SIP_OUTBOUND_TRUNK_ID
+```
+
+`telephony/outbound-trunk.json` is only that template: the description of the
+trunk that LiveKit needs, namely a name, the provider's termination address
+and the caller ID number. It is read once, when the trunk is created, and never
+by the agent, which only needs the resulting `SIP_OUTBOUND_TRUNK_ID`. The filled
+copy is `outbound-trunk.local.json`, which git ignores, because it holds your
+number.
+
+**3. Call.** `./.venv/bin/python dispatch_outbound.py` with the worker running;
+see [Running](#running) for which number rings.
+
+[telephony/README.md](telephony/README.md) has the other providers and the SIP
+status codes. On a real line the agent dials from inside the room, waits for
 the answer before speaking so it never talks over the ringtone, waits ~2.5s for
 the callee to say hello, and hangs up shortly after its closing words.
 

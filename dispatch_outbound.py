@@ -67,7 +67,7 @@ async def dispatch(patient_id: str | None, phone: str | None, browser: bool,
             # analysis and Opik trace for a refused call can be exercised.
             metadata["simulate_status"] = simulate_status
         elif not os.environ.get("SIP_OUTBOUND_TRUNK_ID"):
-            print("SIP_OUTBOUND_TRUNK_ID is not set; see telephony/README.md", file=sys.stderr)
+            print("SIP_OUTBOUND_TRUNK_ID is not set: run install.py and set up phone calls", file=sys.stderr)
             return 2
 
     room = _room_name(patient["id"])
