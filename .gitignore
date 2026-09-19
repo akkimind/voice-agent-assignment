@@ -35,3 +35,6 @@ logs/
 .remember/
 .claude/settings.local.json
 evals/results/
+
+# The assignment brief and private planning notes: kept locally, not published.
+resources/
