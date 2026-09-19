@@ -1,6 +1,6 @@
 # Rework plan: meaning over keywords, measured
 
-Status: **approved.** W1–W4 done (baseline: docs/scorecard-baseline.md, new tests on today's code: docs/scorecard-w4-checkpoint.md); W5 next.
+Status: **done.** W1–W8 complete; results in the README's Scorecard section and docs/scorecard-w8.md. Evals continue in free daily batches.
 
 ## Why
 

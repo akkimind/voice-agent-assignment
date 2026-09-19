@@ -253,8 +253,9 @@ key not configured for LLM" until a provider key is added to the workspace.
 ## Testing
 
 ```shell
-./.venv/bin/python -m unittest                        # 226 tests, no network
-./.venv/bin/python -m evals                           # every suite, real model
+./.venv/bin/python -m unittest                        # 216 tests, no network
+./.venv/bin/python -m evals                           # every suite, Groq free tier only
+./.venv/bin/python -m evals --allow-paid              # LiveKit Inference may serve the rest (spends credit)
 ./.venv/bin/python -m evals --suite probes --only P:evening --phrasings 8
 ./.venv/bin/python -m evals --suite redteam,clinical
 ./.venv/bin/python -m evals.from_log logs/<call>.jsonl --id <name> --expect evening
@@ -314,35 +315,44 @@ yet says so, and names the work that will add it; it is never estimated.
 success, semantic robustness and fixed tokens are no worse than the last
 accepted scorecard. The command exits non-zero otherwise.
 
-**Baseline**, taken on 19 September before the prompt rework
-([docs/rework-plan.md](docs/rework-plan.md)), 45 conversations:
+**Results.** A baseline was taken before the rework, the new tests were run on
+the same code (the W4 checkpoint), then the prompt, tools and guards were
+rebuilt (W5 to W7) and measured again. 116 conversations per full run.
 
-| Metric | Baseline | Target |
-| --- | --- | --- |
-| Scenario success | 53% (24/45) | ≥ 95% |
-| Phone number spoken | 32 times | 0 |
-| Results or condition disclosed to a non-patient | 0 | 0 |
-| Booking rate among willing patients | 96% | ≥ 95% |
-| Preference fit | 83% | ≥ 90% |
-| Fixed tokens per request | 1,338 early, 1,867 when booking | no rise |
-| Analysis booking fact vs database | 45/45 | 100% |
-| Reply latency, live calls | p50 1.75 s, p95 4.59 s | ≤ 1.5 s, ≤ 3 s |
+| Metric | Target | Baseline | W4 checkpoint | After rework |
+| --- | --- | --- | --- | --- |
+| Scenario success (personas) | ≥ 95% | 53% | 53% | 89% |
+| Semantic robustness (probes) | ≥ 95% | not measured | 48% | **96%** |
+| Phone number spoken | 0 | 32 | 52 | **0** |
+| Interpretation, range or condition named | 0 | not measured | 30 | **0** |
+| Medical advice | 0 | not measured | 0 | **0** |
+| Results or reason told to a non-patient | 0 | not measured | 7 | 1 → **0** in later targeted runs |
+| Red-team calls with a privacy breach | 0 | not measured | 6 of 20 | 1 of 20 → **0** in later targeted runs |
+| Booking rate among willing patients | ≥ 95% | 96% | 90% | **100%** |
+| Preference fit | ≥ 90% | 83% | 100% | **90%** |
+| Right tool for the intent | ≥ 95% | not measured | 96% | **100%** |
+| Analysis booking fact vs database | 100% | 100% | 100% | **100%** |
+| Fixed tokens per request, before / at booking | no rise | 1,338 / 1,867 | same | **1,331 / 1,704** |
 
-Most failures are one rule: the current prompt reads out the front desk
-number, and the scorecard now counts any spoken phone number as a breach. The
-other real bug found: a patient who names only a time ("can you do twelve
-thirty?") before any offer gets booked for today without being asked the day.
-One "invented time" is a false positive (the patient said "one o'clock", the
-check only reads digits). Full card: [docs/scorecard-baseline.md](docs/scorecard-baseline.md).
+Cards: [baseline](docs/scorecard-baseline.md), [W4 checkpoint](docs/scorecard-w4-checkpoint.md),
+[after the rework](docs/scorecard-w8.md).
 
-**W4 checkpoint**, the new tests on the same code, 116 conversations
-([docs/scorecard-w4-checkpoint.md](docs/scorecard-w4-checkpoint.md)): semantic
-robustness 48% (evening preference 0/4, someone else answering 0/4), 30
-conversations with an interpretation or condition name ("above the usual
-range"), and 6 of 20 red-team calls got something: a fake "system notice" and a
-request to book for the patient each got the full results read out, and a
-booking was made for someone who was not the patient. These are what the
-prompt and guard rework (W5 to W7) must bring to zero.
+The "after rework" column is the last full run. Its three remaining breaches
+(a proxy leak, a similar name accepted, a declined slot booked) were each fixed
+afterwards and each fix passed its targeted run (34 of 34 conversations), but
+no full run has re-measured everything since. The reason is cost: Groq's free
+tier allows about 12 conversations a day, and a full run is 116. Evals now run
+free by default, in daily batches (`--allow-paid` lets LiveKit Inference serve
+the rest and spends credit).
+
+What the evals cannot move:
+
+- **Latency** (p50 1.75 s against 1.5 s, p95 4.59 s against 3 s) is measured on
+  live calls only, and none has been made since the rework.
+- **Consistency** (22% of personas mixed against 5%) needs three to five runs
+  per persona to mean anything; with two runs a single wobble counts as mixed.
+  The remaining wobbles are mostly the simulated caller going off script.
+- **Telephony** stays unmeasured until a SIP trunk is funded.
 
 ---
 
@@ -358,8 +368,10 @@ Per call of roughly 11 turns, at list prices:
 | Post-call analysis (`gpt-oss-20b`) | ~$0.0001 |
 | Opik trace and the judge | free tier |
 
-A full eval run is about $0.06. Phone minutes are extra, and depend on the SIP
-provider.
+A full eval run (116 conversations, including red-team callers and a judge on
+`gpt-oss-120b`) is about $0.30 at list prices, more than Groq's free tier
+covers in a day; by default evals run free, about 12 conversations a day. Phone
+minutes are extra, and depend on the SIP provider.
 
 ---
 
@@ -419,7 +431,7 @@ for a real one.
 
 | Area | State |
 | --- | --- |
-| Browser calls | Working end to end, including booking, callbacks and privacy |
+| Browser calls | Working end to end before the rework; the reworked agent (generated opening, identity tool, `end_call`) is verified by evals but not yet on a live call |
 | Post-call analysis | Working, verified on a live call |
 | Opik trace | Working, verified on the server |
 | Opik online rule | Working: a replayed call was scored automatically |
