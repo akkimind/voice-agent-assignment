@@ -103,8 +103,8 @@ SERVICES = [
     Service(
         "LiveKit Cloud", "Runs the call: rooms, audio, the agent worker, phone dialling.",
         ["Sign up or log in at https://cloud.livekit.io and create a project.",
-         "Project URL: Settings → Project → URL (it starts with wss://).",
-         "Key and secret: Settings → API Keys → Create key. Copy both; the secret is shown once."],
+         "Project URL: Settings → General → Project URL. It is shown without wss://; add it in front.",
+         "Key and secret: Settings → API keys → Create key. Copy both; the secret is shown once."],
         [Field("LIVEKIT_URL", "Project URL", pattern=r"wss://\S+", example="wss://your-project.livekit.cloud"),
          Field("LIVEKIT_API_KEY", "API key", pattern=r"\S{6,}"),
          Field("LIVEKIT_API_SECRET", "API secret", secret=True, pattern=r"\S{16,}")],

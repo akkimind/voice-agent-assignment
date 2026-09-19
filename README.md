@@ -212,8 +212,8 @@ search box.
 
 | Variable | Service | Where to get it |
 | --- | --- | --- |
-| `LIVEKIT_URL` | [LiveKit Cloud](https://cloud.livekit.io) | Create a project. **Settings → Project → URL**, starting `wss://` |
-| `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | [LiveKit Cloud](https://cloud.livekit.io) | **Settings → API Keys → Create key**. The secret is shown once |
+| `LIVEKIT_URL` | [LiveKit Cloud](https://cloud.livekit.io) | Create a project. **Settings → General → Project URL**. It is shown without the scheme; write it as `wss://<project>.livekit.cloud` |
+| `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | [LiveKit Cloud](https://cloud.livekit.io) | **Settings → API keys → Create key**. The secret is shown once |
 | `GROQ_API_KEY` | [Groq](https://console.groq.com) | **API Keys** ([console.groq.com/keys](https://console.groq.com/keys)) **→ Create API Key**. Shown once |
 | `DEEPGRAM_API_KEY` | [Deepgram](https://console.deepgram.com) | **Projects** menu (top left) → your project → **Settings → API Keys → Create a New API Key**. Shown once |
 | `OPIK_API_KEY` | [Opik](https://www.comet.com/opik) (optional) | Your avatar (top right) **→ API Key** |
