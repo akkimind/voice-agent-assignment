@@ -178,6 +178,19 @@ class Identity(unittest.TestCase):
             raise TimeoutError("no answer")
         self.assertIn("unclear", verify(an_agent(checker=broken), said("Yes, it's me."), True))
 
+    def test_the_second_opinion_reads_what_the_model_is_answering(self):
+        """Live, the newest line reaches the model before session.history."""
+        heard = []
+
+        def checker(name, lines):
+            heard.extend(lines)
+            return True
+
+        a = an_agent(checker=checker)
+        a._last_chat_ctx = chat(("assistant", "May I speak with Arjun?"), ("user", "Arjun speaking."))
+        verify(a, said("Yes. Hi."), True)   # the history lags one line behind
+        self.assertEqual(heard[-1], "PERSON: Arjun speaking.")
+
     def test_nobody_has_answered_yet(self):
         self.assertIn("unknown", verify(self.a, said(), True))
         self.assertEqual(self.a.identity, "unknown")

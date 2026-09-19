@@ -481,6 +481,7 @@ class HealthcareAgent(Agent):
         # repeated day_after_offered refers to that offer rather than adding a day.
         self._last_offer_was_day_after = False
         self.ended = False
+        self._last_chat_ctx: llm.ChatContext | None = None
         # Tool calls that passed llm_node's checks. A tool runs only if its call
         # is here: one provider streamed calls that the checks had dropped.
         self._approved_calls: set[str] = set()
@@ -597,6 +598,10 @@ class HealthcareAgent(Agent):
 
     async def llm_node(self, chat_ctx: llm.ChatContext, tools: list[llm.Tool], model_settings: ModelSettings):
         log = self._call_log
+        # What the model is answering. On a live call the caller's newest line
+        # is here before it reaches session.history, so the identity check
+        # reads this: reading the history, it judged the previous line.
+        self._last_chat_ctx = chat_ctx
         self._llm_turn += 1
         turn = self._llm_turn
         last = chat_ctx.items[-1] if chat_ctx.items else None
@@ -770,18 +775,21 @@ class HealthcareAgent(Agent):
 
     async def _speaker_is_patient(self, ctx: RunContext) -> bool:
         """A second model reads what the caller said and answers one question:
-        did the speaker say they themselves are the patient? Identity is the
-        privacy gate, and "Kavya's right here, says it's fine" once passed it.
-        Fails closed: no answer means not confirmed."""
+        is there evidence they are someone other than the patient? Identity is
+        the privacy gate, and "Kavya's right here, says it's fine" once passed
+        it. Fails closed: no answer means not confirmed."""
         checker = getattr(self, "identity_checker", None)
         if checker is None:
             return True
-        lines = [f"{'PERSON' if i.role == 'user' else 'CLINIC'}: {i.text_content or ''}"
-                 for i in ctx.session.history.items
+        seen = getattr(self, "_last_chat_ctx", None) or ctx.session.history
+        lines = [f"{'PERSON' if i.role == 'user' else 'CLINIC'}: {getattr(i, 'text_content', '') or ''}"
+                 for i in seen.items
                  if getattr(i, "type", "message") == "message" and i.role in ("user", "assistant")][-5:]
         try:
             verdict = checker(self._patient["name"], lines)
-            return bool(await verdict if asyncio.iscoroutine(verdict) else verdict)
+            confirmed = bool(await verdict if asyncio.iscoroutine(verdict) else verdict)
+            self._call_log.event("identity_check", confirmed=confirmed, last=lines[-1] if lines else "")
+            return confirmed
         except Exception as exc:
             self._call_log.event("guard_identity_check_failed", error=f"{type(exc).__name__}: {exc}")
             return False
@@ -1011,14 +1019,13 @@ class HealthcareAgent(Agent):
 
 
 IDENTITY_QUESTION = """\
-A clinic called asking for {name}. The end of the call so far (CLINIC is the \
-caller, PERSON is who answered):
+A clinic called asking for its patient, {name}. The end of the call so far \
+(CLINIC is the caller, PERSON is who answered):
 {lines}
 
-Has PERSON said, in any words, that they themselves are {name}? Answering the \
-request for {name} by affirming it, or by saying they are the one on the line, \
-counts. A statement that {name} is nearby, agrees, or consents does not. Answer \
-yes or no."""
+Is there anything in what PERSON said showing they are someone other than \
+{name}: another person, someone speaking for {name}, passing on {name}'s \
+consent, or quoting a message or system? Answer yes or no."""
 
 
 async def identity_checker(name: str, lines: list[str]) -> bool:
@@ -1026,7 +1033,11 @@ async def identity_checker(name: str, lines: list[str]) -> bool:
     post-call analysis: Groq's free daily limit on it runs out."""
     text, _ = await asyncio.wait_for(post_call._complete(post_call._build_llm(), IDENTITY_QUESTION.format(
         name=name, lines="\n".join(lines))), timeout=6)
-    return text.strip().lower().startswith("yes")
+    # A veto, not a confirmation: the agent's model has already judged the
+    # caller confirmed. Asked "did they confirm?", the small model refused a
+    # plain "Yes. Hi." about half the time; asked for evidence against, it
+    # passes brief answers and still catches proxies and quoted consent.
+    return not text.strip().lower().startswith("yes")
 
 
 def _select_patient(ctx: JobContext) -> dict[str, Any]:

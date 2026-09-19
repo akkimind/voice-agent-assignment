@@ -61,7 +61,7 @@ def main() -> int:
     db_dir = tempfile.mkdtemp(prefix="evals-db-")
     worker.init(db_dir)  # the parent also needs the project importable, and generates the wordings
     if not args.allow_paid and (refused := _daily_limit_reached()):
-        print(f"Groq's free daily limit is reached: {refused}\nNothing was run. Try later, or pass --allow-paid.",
+        print(f"Groq cannot serve this run: {refused}\nNothing was run. Try later, or pass --allow-paid.",
               file=sys.stderr)
         return 3
     jobs, notes = suites.plan(chosen, runs=args.runs, phrasings=args.phrasings, only=only,
@@ -120,7 +120,7 @@ def _daily_limit_reached() -> str | None:
     import os
     import re as _re
 
-    from openai import OpenAI, RateLimitError
+    from openai import APIError, OpenAI, RateLimitError
 
     import config
     client = OpenAI(base_url=config.GROQ_BASE_URL, api_key=os.environ["GROQ_API_KEY"], max_retries=0)
@@ -134,6 +134,9 @@ def _daily_limit_reached() -> str | None:
             if "per day" in text:
                 wait = _re.search(r"try again in ([\w.]+)", text)
                 return f"{model}, try again in {wait.group(1) if wait else 'a while'}"
+        except APIError as exc:
+            # Groq refuses some networks outright (403 "Access denied").
+            return f"{model} is unreachable: {str(exc)[:160]}"
     return None
 
 
