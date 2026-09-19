@@ -14,6 +14,44 @@ change.
 From those, `install.py` creates the trunk in LiveKit and writes its id,
 `SIP_OUTBOUND_TRUNK_ID`, which is the only one the agent reads at call time.
 
+## Status: implemented, not funded
+
+The telephony path is written, unit-tested and documented, but no call has been
+placed over a real line. Every free route to a SIP trunk was blocked by the
+provider, not by the code:
+
+| Provider | What happened |
+| --- | --- |
+| Twilio | Account works and the number is verified, but a trial account cannot use Elastic SIP Trunking. `<Dial><Sip>` from Programmable Voice is refused as well: the call connects, Twilio plays an error, and no SIP INVITE ever reaches LiveKit. Verified with authentication removed from the inbound trunk, so credentials were not the cause |
+| Plivo | Signup rejects free email domains, and a company domain too |
+| Sinch | Signup rejects the same addresses, including a university one |
+| LiveKit Phone Numbers | Inbound only; their docs state outbound needs a third-party provider |
+
+### What the phone path does and does not cover
+
+| Behaviour | State |
+| --- | --- |
+| Dialling, answer detection, hangup | Implemented; unit-tested with a stand-in for the network |
+| Busy, declined, unanswered → `rejected` / `no_answer` | Implemented; the mapping is unit-tested, and `--simulate-status` exercises the whole pipeline without a phone |
+| Voicemail | Defined only. Detecting an answering machine needs carrier-side detection, which is a paid feature; nothing in this repo can tell a machine from a person |
+| 8 kHz audio quality, barge-in over a real line | Untested. These are the things only a real call teaches, and they are the honest gap |
+
+### Trying the refused-call paths without a phone
+
+A browser call is always answered, so it cannot produce a carrier status. To
+exercise those paths end to end, inject one:
+
+```shell
+./.venv/bin/python dispatch_outbound.py --simulate-status 486   # busy      -> rejected
+./.venv/bin/python dispatch_outbound.py --simulate-status 487   # ring-out  -> no_answer
+```
+
+The agent records the attempt, runs the post-call analysis with no model
+involved (nobody spoke), and sends the Opik trace, exactly as a real refused
+call would. Every such record carries `simulated: true`, in the call log, the
+analysis file and the Opik trace, so a simulated attempt can never be mistaken
+for a real one.
+
 ---
 
 ## 1. Set up the trunk at the provider
@@ -79,7 +117,7 @@ and run `--trunk` again to update the trunk.
 In real use the agent calls the number in the patient's record. The five
 patients in `patients.json` are fictional, with `+1 555 555 01xx` numbers, so a
 demo needs a real phone: set `DEMO_DIAL_TO` in `.env`, or pass `--phone` for a
-one-off. See [Running](../README.md#running) in the main README.
+one-off. See [Running](../docs/setup.md#running).
 
 ### What happens on a call
 

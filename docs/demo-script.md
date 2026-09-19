@@ -41,7 +41,7 @@ Check your microphone in a quiet room. Close notifications.
 > It's built on LiveKit Agents, with Deepgram for speech, and gpt-oss-120b on
 > Groq, with LiveKit Inference serving the same model as a fallback.
 
-Show the architecture diagram in the README while you say it.
+Show the architecture diagram in [how-it-works.md](how-it-works.md) while you say it.
 
 ---
 
@@ -174,7 +174,7 @@ Wait ~20 seconds, then show the newest analysis file: outcome `no_answer`,
 
 ## 7. How I know it works — 1 minute
 
-Show the README's Scorecard section (the before-and-after table), then the
+Show the before-and-after table in the README (Quality, in brief), then the
 card itself:
 
 ```shell
@@ -206,10 +206,10 @@ Then open `agent.py` at `SpeechGate` and `verify_identity`:
 > Real phone calls. The telephony code is written and tested, and it's
 > provider-agnostic. But every free route to a SIP trunk was blocked: Twilio's
 > trial refuses both trunking and SIP dialling, and Plivo and Sinch refuse the
-> signup. It's documented in the README, and with a funded trunk it's a
+> signup. It's documented in the phone guide, and with a funded trunk it's a
 > configuration change, not a code change.
 
-Show the README's telephony table while you say it.
+Show the status table in [telephony/README.md](../telephony/README.md) while you say it.
 
 ---
 
